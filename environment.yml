@@ -1,0 +1,17 @@
+name: fibrin
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - numpy
+  - opencv
+  - pandas
+  - ipykernel
+  - sqlalchemy
+  - scikit-image
+  - matplotlib
+  - torchvision
+  - torchaudio
+  - pytorch
+  - pytest
+prefix: /home/jhtullis/miniconda3/envs/fibrin
