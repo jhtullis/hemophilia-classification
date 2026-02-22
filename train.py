@@ -138,7 +138,7 @@ def main():
     optimizer = torch.optim.Adam(model.parameters(), lr=LR,
                                  weight_decay=WEIGHT_DECAY)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="max", factor=0.5, patience=5, verbose=True
+        optimizer, mode="max", factor=0.5, patience=5
     )
 
     # --- Training loop ---
