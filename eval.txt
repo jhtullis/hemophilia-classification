@@ -1,0 +1,85 @@
+(fibrin) jhtullis@shasta:~/JHT_Shasta/Library_Shasta/Work/Cordner_Lab/Fibrin/code/claude_cnn$ python train.py
+Loading data and performing train/test split …
+
+Class names:  ['AC3', 'F08D', 'F09D', 'F11D', 'NC1']
+Train images (with 4× augmentation): 2632
+Test images:  201
+Train class counts (base): {'AC3': 178, 'F08D': 80, 'F09D': 140, 'F11D': 140, 'NC1': 120}
+Test class counts:         {'AC3': 41, 'F08D': 40, 'F09D': 40, 'F11D': 40, 'NC1': 40}
+
+Train record saved to: /home/jhtullis/JHT_Shasta/Library_Shasta/Work/Cordner_Lab/Fibrin/code/claude_cnn/train_record.json
+
+FibrinCNN parameter summary
+----------------------------------------
+  features.0                                       800
+  features.1                                        64
+  features.4                                    51,200
+  features.5                                       128
+  features.8                                    73,728
+  features.9                                       256
+  features.12                                  294,912
+  features.13                                      512
+  classifier.0                                  32,896
+  classifier.3                                     645
+----------------------------------------
+  Total                                        455,141
+
+Training for 30 epochs on cpu …
+
+ Epoch    Train Loss    Test Acc    Time (s)
+---------------------------------------------
+     1        1.1180      0.5075       685.2  ← best
+     2        1.0023      0.4080       550.0
+     3        0.9672      0.4627       475.4
+     4        0.9476      0.4627       476.7
+     5        0.9254      0.1990       486.2
+     6        0.8967      0.4776       632.9
+     7        0.8918      0.2935       479.6
+     8        0.8542      0.3881       480.8
+     9        0.8038      0.2886       481.3
+    10        0.8029      0.5174      1273.0  ← best
+    11        0.7435      0.3234       491.2
+    12        0.7689      0.4328       485.4
+    13        0.7566      0.4627       491.3
+    14        0.7483      0.5672       485.1  ← best
+    15        0.7130      0.3980       482.1
+    16        0.7154      0.2985       484.9
+    17        0.6799      0.3980       484.9
+    18        0.6677      0.4826       485.3
+    19        0.7087      0.4677       487.2
+    20        0.6695      0.5025       485.5
+    21        0.6119      0.5274       487.8
+    22        0.5952      0.4677       486.1
+    23        0.6022      0.5224       487.1
+    24        0.5998      0.3483       492.7
+    25        0.5929      0.5622       484.2
+    26        0.5824      0.5771       483.8  ← best
+    27        0.5715      0.3632       485.7
+    28        0.5794      0.5672      1018.2
+    29        0.5903      0.4229       713.3
+    30        0.5493      0.5224       762.5
+
+Best test accuracy: 0.5771
+Best model saved to: /home/jhtullis/JHT_Shasta/Library_Shasta/Work/Cordner_Lab/Fibrin/code/claude_cnn/best_model.pth
+
+Detailed evaluation of best model on test set:
+
+Class         Precision     Recall         F1    Support
+-------------------------------------------------------
+AC3               0.703      0.634      0.667         41
+F08D              0.600      0.150      0.240         40
+F09D              0.471      0.825      0.600         40
+F11D              0.528      0.475      0.500         40
+NC1               0.667      0.800      0.727         40
+-------------------------------------------------------
+                  Overall accuracy       0.577
+
+Confusion matrix (rows=true, cols=predicted):
+                 AC3    F08D    F09D    F11D     NC1
+AC3               26       0       3       1      11
+F08D               4       6      22       8       0
+F09D               0       0      33       7       0
+F11D               0       4      12      19       5
+NC1                7       0       0       1      32
+
+(fibrin) jhtullis@shasta:~/JHT_Shasta/Library_Shasta/Work/Cordner_Lab/Fibrin/code/claude_cnn$ 
