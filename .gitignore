@@ -1,3 +1,11 @@
 *.JPG
 *.db
 __pycache__
+
+# Trained model weights and split records (large binaries / derived data)
+models/*/best_model.pth
+models/*/train_record.json
+
+# Legacy root-level artifacts (moved to models/5class/)
+best_model.pth
+train_record.json

@@ -12,12 +12,14 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from data_loader import CLASS_NAMES, create_dataloaders
+from data_loader import CLASS_NAMES, FibrinDataset, load_split_from_record
 from model import FibrinCNN
+from preprocessing import make_preprocessor
 
-DB_PATH   = os.path.join(os.path.dirname(__file__), "data", "test_db.db")
-PHOTO_DIR = os.path.join(os.path.dirname(__file__), "data", "photos")
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "best_model.pth")
+DB_PATH     = os.path.join(os.path.dirname(__file__), "data", "test_db.db")
+PHOTO_DIR   = os.path.join(os.path.dirname(__file__), "data", "photos")
+MODEL_PATH  = os.path.join(os.path.dirname(__file__), "models", "5class", "best_model.pth")
+RECORD_PATH = os.path.join(os.path.dirname(__file__), "models", "5class", "train_record.json")
 
 
 # ---------------------------------------------------------------------------
@@ -147,23 +149,22 @@ def main():
     device = torch.device("cpu")
 
     if not os.path.exists(MODEL_PATH):
-        print(f"No model found at {MODEL_PATH}. Run train.py first.")
+        print(f"No model found at {MODEL_PATH}. Run train_5class.py first.")
         return
 
     print("Loading model …")
     model = load_model(MODEL_PATH, device=device)
     print(model.summary())
 
-    print("\nLoading test data …")
-    _, test_loader, meta = create_dataloaders(
-        db_path=DB_PATH,
-        photo_dir=PHOTO_DIR,
-        batch_size=16,
-        num_workers=4,
-    )
+    print("\nLoading test data from saved split …")
+    _, test_df = load_split_from_record(RECORD_PATH, DB_PATH)
+    preprocessor = make_preprocessor(gray_method="lab_l", pool_factor=10)
+    test_ds = FibrinDataset(test_df, PHOTO_DIR, preprocessor, augment=False)
+    test_loader = DataLoader(test_ds, batch_size=16, shuffle=False,
+                             num_workers=4, pin_memory=False)
 
     print("Running inference on test set …")
-    results = evaluate_model(model, test_loader, device, meta["class_names"])
+    results = evaluate_model(model, test_loader, device, CLASS_NAMES)
 
     print(f"\nTest accuracy: {results['accuracy']:.4f}")
     print(results["report_str"])

@@ -223,6 +223,59 @@ def make_balanced_sampler(dataset: FibrinDataset) -> WeightedRandomSampler:
 # Convenience factory
 # ---------------------------------------------------------------------------
 
+def load_split_from_record(
+    record_path: str,
+    db_path: str,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Reconstruct the train/test DataFrames from a saved train_record.json.
+
+    Reads the stored integer image indices (not a random re-split) so the
+    held-out test set is always identical regardless of when this is called.
+
+    Args:
+        record_path: Path to a train_record.json produced by save_train_record().
+        db_path:     Path to the SQLite database (for load_metadata).
+
+    Returns:
+        (train_df, test_df) — same structure as split_by_experiment output.
+    """
+    with open(record_path) as f:
+        record = json.load(f)
+    train_indices = set(record["train_indices"])
+    test_indices  = set(record["test_indices"])
+
+    engine = get_engine(db_path)
+    df = load_metadata(engine)
+
+    train_df = df[df["idx"].isin(train_indices)].reset_index(drop=True)
+    test_df  = df[df["idx"].isin(test_indices)].reset_index(drop=True)
+
+    assert len(train_df) + len(test_df) == len(train_indices) + len(test_indices), (
+        f"Record/DB mismatch: expected {len(train_indices)+len(test_indices)} images, "
+        f"got {len(train_df)+len(test_df)}"
+    )
+    return train_df, test_df
+
+
+def filter_classes(df: pd.DataFrame, classes: List[str]) -> pd.DataFrame:
+    """Return a subset of df containing only the specified classes.
+
+    Args:
+        df:      Metadata DataFrame (must have an 'Exp_Type' column).
+        classes: Class names to keep.  Each must be a key in CLASS_MAP.
+
+    Returns:
+        Filtered DataFrame, index reset.
+
+    Raises:
+        ValueError: if any element of classes is not in CLASS_MAP.
+    """
+    unknown = [c for c in classes if c not in CLASS_MAP]
+    if unknown:
+        raise ValueError(f"Unknown class(es): {unknown}. Valid: {list(CLASS_MAP)}")
+    return df[df["Exp_Type"].isin(classes)].reset_index(drop=True)
+
+
 def create_dataloaders(
     db_path: str,
     photo_dir: str,

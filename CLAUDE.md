@@ -23,21 +23,27 @@ Class map (integer labels): AC3=0, F08D=1, F09D=2, F11D=3, NC1=4
 
 ## File Structure
 ```
-preprocessing.py      Grayscale + 10× min-pool
-augmentation.py       4-fold flip augmentations
-data_loader.py        DB access, Dataset, DataLoaders
-model.py              FibrinCNN architecture (~455K params)
-train.py              Training loop → best_model.pth, train_record.json
-evaluate.py           Per-class precision/recall/F1, confusion matrix
-test_preprocessing.py Visual + structural tests
-test_augmentation.py  Visual + property tests
-test_data_loader.py   DB, split, Dataset unit tests
-PLAN.md               Architecture decisions and rationale
-environment.yml       Conda environment
-data/photos/          Raw images
-data/test_db.db       SQLite labels
-best_model.pth        Saved model weights (after training)
-train_record.json     Split record (which images → train/test)
+preprocessing.py           Grayscale + 10× min-pool
+augmentation.py            4-fold flip augmentations
+data_loader.py             DB access, Dataset, DataLoaders, split helpers
+model.py                   FibrinCNN architecture (~455K params)
+train_5class.py            5-class training loop
+train_3class.py            3-class hemophilia CNN (--mode scratch|finetune)
+evaluate.py                Per-class precision/recall/F1, confusion matrix
+hemophilia_analysis.py     ROC curves + annotated images (multi-model)
+visualize_weights.py       CNN kernel heatmaps + activation maps
+test_preprocessing.py      Visual + structural tests
+test_augmentation.py       Visual + property tests
+test_data_loader.py        DB, split, Dataset unit tests
+PLAN.md                    Architecture decisions and rationale
+environment.yml            Conda environment
+data/photos/               Raw images
+data/test_db.db            SQLite labels
+models/5class/             5-class model artifacts
+  best_model.pth             Saved weights
+  train_record.json          Canonical train/test split
+models/3class_hemo/        3-class from-scratch model artifacts
+models/3class_hemo_finetune/ 3-class fine-tuned model artifacts
 ```
 
 ## CNN Architecture
@@ -66,7 +72,7 @@ Receptive field after Block 4: **520 px** in original space (requirement: ≥300
 - Target ~75% train per class; F08D uses 5/6 experiments (~83%)
 - `WeightedRandomSampler` + `CrossEntropyLoss(weight=...)` for class imbalance
 
-## Hyperparameters (train.py)
+## Hyperparameters (train_5class.py)
 | Parameter    | Value  |
 |--------------|--------|
 | batch_size   | 16     |
@@ -78,12 +84,22 @@ Receptive field after Block 4: **520 px** in original space (requirement: ≥300
 ## Running
 ```bash
 conda activate fibrin
-pytest -v -s           # run all tests
-python train.py        # train → best_model.pth
-python evaluate.py     # detailed metrics on test set
+pytest -v -s                                  # run all tests
+python train_5class.py                        # train 5-class → models/5class/
+python train_3class.py --mode scratch         # train 3-class from scratch
+python train_3class.py --mode finetune        # fine-tune 5-class → 3-class
+python evaluate.py                            # detailed metrics on 5-class test set
+python hemophilia_analysis.py --roc           # ROC for F08D/F09D/F11D
+python hemophilia_analysis.py --compare       # compare all models side-by-side
+python visualize_weights.py                   # kernel heatmaps + activation maps
 ```
+
+## data_loader.py Key Exports
+- `load_split_from_record(record_path, db_path)` — reconstruct (train_df, test_df) from saved JSON; never re-randomizes
+- `filter_classes(df, classes)` — subset DataFrame to specified class names
 
 ## Known Issues / Fixes Applied
 - `ReduceLROnPlateau(verbose=True)` removed — argument dropped in PyTorch 2.4+
+- `np.trapz` → `np.trapezoid` — renamed in NumPy 2.0
 - No sklearn dependency; metrics computed from scratch in `evaluate.py`
 - Machine has no GPU; training runs on CPU only
