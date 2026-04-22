@@ -9,3 +9,5 @@ models/*/train_record.json
 # Legacy root-level artifacts (moved to models/5class/)
 best_model.pth
 train_record.json
+
+test_output/frangi/
