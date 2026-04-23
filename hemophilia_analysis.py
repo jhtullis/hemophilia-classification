@@ -35,10 +35,10 @@ import torch
 
 from data_loader import CLASS_MAP, CLASS_NAMES, filter_classes, load_split_from_record
 from model import FibrinCNN
-from preprocessing import make_preprocessor
+from preprocessing import ensure_landscape, make_preprocessor
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-DB_PATH    = "data/test_db.db"
+DB_PATH    = os.path.join(os.path.dirname(__file__), "data", "endpoint10.db")
 PHOTOS_DIR = "data/photos"
 
 HEMOPHILIA_CLASSES: List[str] = ["F08D", "F09D", "F11D"]
@@ -320,6 +320,7 @@ def run_annotate_images(
         if img_bgr is None:
             print(f"   WARNING: could not read {src_path} — skipping.")
             continue
+        img_bgr = ensure_landscape(img_bgr)
 
         true_cls = inv_class_map[int(true_labels[i])]
         pred_cls = inv_class_map[int(probs[i].argmax())]
@@ -348,6 +349,7 @@ def run_compare(
     output_path: str,
     device: torch.device,
     preprocessor,
+    db_path: str = DB_PATH,
 ) -> None:
     """Overlay ROC curves from all available models on one figure and print
     an accuracy comparison table."""
@@ -375,7 +377,7 @@ def run_compare(
         # Reconstruct test set — for 3-class models use the 5-class record
         # filtered to hemophilia classes; for 5-class use the 5-class record directly
         rec = record_path if os.path.exists(record_path) else "models/5class/train_record.json"
-        _, test_df = load_split_from_record(rec, DB_PATH)
+        _, test_df = load_split_from_record(rec, db_path)
         if num_classes == 3:
             test_df = filter_classes(test_df, analysis_classes)
 
@@ -450,6 +452,8 @@ def main() -> None:
     parser.add_argument("--classes", nargs="+", default=HEMOPHILIA_CLASSES,
                         choices=list(CLASS_MAP.keys()), metavar="CLASS",
                         help=f"Classes to include (default: {' '.join(HEMOPHILIA_CLASSES)}).")
+    parser.add_argument("--db", default=DB_PATH, metavar="PATH",
+                        help="Path to SQLite database (default: data/endpoint10.db).")
     args = parser.parse_args()
 
     # Resolve model configuration
@@ -481,7 +485,7 @@ def main() -> None:
     # ── Compare mode ──────────────────────────────────────────────────────────
     if args.compare:
         compare_out = args.roc_output or "hemophilia_roc_compare.png"
-        run_compare(args.classes, compare_out, device, preprocessor)
+        run_compare(args.classes, compare_out, device, preprocessor, db_path=args.db)
         return
 
     # ── Single-model mode ─────────────────────────────────────────────────────
@@ -496,7 +500,7 @@ def main() -> None:
     # Reconstruct test split — 3-class models reuse the 5-class record, filtered
     rec = record_path if os.path.exists(record_path) else "models/5class/train_record.json"
     print(f"Loading test split from {rec} …")
-    _, test_df = load_split_from_record(rec, DB_PATH)
+    _, test_df = load_split_from_record(rec, args.db)
     if num_classes == 3:
         test_df = filter_classes(test_df, args.classes)
 

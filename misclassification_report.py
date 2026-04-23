@@ -27,8 +27,8 @@ import numpy as np
 import pandas as pd
 import torch
 
-from analysis_utils import (CLASS_COLORS, MODEL_REGISTRY, PHOTOS_DIR,
-                             get_test_split, load_model_from_registry,
+from analysis_utils import (CLASS_COLORS, DB_PATH, MODEL_REGISTRY, PHOTOS_DIR,
+                             get_val_split, load_model_from_registry,
                              run_inference_full)
 from evaluate import confusion_matrix as compute_confusion_matrix
 from preprocessing import make_preprocessor
@@ -45,6 +45,8 @@ def _parse_args():
                    help="Which trained model to analyse (default: 5class).")
     p.add_argument("--output-dir", default=None, metavar="DIR",
                    help="Override output directory.")
+    p.add_argument("--db", default=DB_PATH, metavar="PATH",
+                   help="Path to SQLite database (default: data/endpoint10.db).")
     return p.parse_args()
 
 
@@ -328,12 +330,12 @@ def main() -> None:
     print(f"Loading {args.model_type} model ...")
     model, model_dir, num_classes, class_map, class_names = \
         load_model_from_registry(args.model_type, device)
-    test_df = get_test_split(args.model_type)
+    val_df = get_val_split(args.model_type, db_path=args.db)
     preprocessor = make_preprocessor(gray_method="lab_l", pool_factor=10)
 
-    print(f"Running inference on {len(test_df)} test images ...")
+    print(f"Running inference on {len(val_df)} validation images ...")
     results = run_inference_full(
-        model, test_df, PHOTOS_DIR, device, preprocessor, class_map, class_names
+        model, val_df, PHOTOS_DIR, device, preprocessor, class_map, class_names
     )
     print(f"  Overall accuracy: {results['correct'].mean():.4f}")
 

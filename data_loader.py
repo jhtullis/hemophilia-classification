@@ -3,16 +3,16 @@ data_loader.py — Database access, Dataset, and DataLoader construction.
 
 Responsibilities:
   - Load image metadata from the SQLite database via SQLAlchemy
-  - Split data at the experiment level (no leakage between train and test)
+  - Split data at the experiment level (no leakage between train and validation)
   - Provide a PyTorch Dataset that reads images on demand and applies
     preprocessing + optional augmentation
-  - Build class-balanced DataLoaders for training and testing
+  - Build class-balanced DataLoaders for training and validation
 """
 
 import json
 import os
 from datetime import date
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -61,7 +61,7 @@ def load_metadata(engine) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Train / test split
+# Train / validation split
 # ---------------------------------------------------------------------------
 
 def split_by_experiment(
@@ -69,13 +69,13 @@ def split_by_experiment(
     train_ratio: float = 0.75,
     seed: int = 42,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Experiment-level train/test split, stratified by class.
+    """Experiment-level train/validation split, stratified by class.
 
     All images from the same experiment stay in the same partition
-    to prevent data leakage between train and test sets.
+    to prevent data leakage between train and validation sets.
 
     For classes with very few experiments (e.g. F08D has 6), a floor of
-    1 test experiment is guaranteed; this may push the effective train
+    1 validation experiment is guaranteed; this may push the effective train
     ratio above the requested value for small classes.
 
     Args:
@@ -84,10 +84,10 @@ def split_by_experiment(
         seed:        Random seed for reproducible splits.
 
     Returns:
-        (train_df, test_df) — non-overlapping subsets of df.
+        (train_df, val_df) — non-overlapping subsets of df.
     """
     rng = np.random.default_rng(seed)
-    train_rows, test_rows = [], []
+    train_rows, val_rows = [], []
 
     for cls in CLASS_MAP:
         cls_df = df[df["Exp_Type"] == cls]
@@ -95,24 +95,24 @@ def split_by_experiment(
         rng.shuffle(experiments)
 
         n_train = max(1, round(len(experiments) * train_ratio))
-        n_train = min(n_train, len(experiments) - 1)  # keep ≥1 for test
+        n_train = min(n_train, len(experiments) - 1)  # keep ≥1 for validation
 
         train_exps = set(experiments[:n_train])
         train_rows.append(cls_df[cls_df["Experiment"].isin(train_exps)])
-        test_rows.append(cls_df[~cls_df["Experiment"].isin(train_exps)])
+        val_rows.append(cls_df[~cls_df["Experiment"].isin(train_exps)])
 
     train_df = pd.concat(train_rows).reset_index(drop=True)
-    test_df = pd.concat(test_rows).reset_index(drop=True)
-    return train_df, test_df
+    val_df = pd.concat(val_rows).reset_index(drop=True)
+    return train_df, val_df
 
 
-def save_train_record(train_df: pd.DataFrame, test_df: pd.DataFrame,
+def save_train_record(train_df: pd.DataFrame, val_df: pd.DataFrame,
                       path: str, **kwargs) -> None:
     """Save a JSON record of which images were used for training.
 
     Args:
         train_df: Training split DataFrame.
-        test_df:  Test split DataFrame.
+        val_df:   Validation split DataFrame.
         path:     Output JSON file path.
         **kwargs: Additional metadata to include (e.g. seed, gray_method).
     """
@@ -123,15 +123,15 @@ def save_train_record(train_df: pd.DataFrame, test_df: pd.DataFrame,
             cls: sorted(train_df[train_df["Exp_Type"] == cls]["Experiment"].unique().tolist())
             for cls in CLASS_MAP
         },
-        "test_experiments": {
-            cls: sorted(test_df[test_df["Exp_Type"] == cls]["Experiment"].unique().tolist())
+        "val_experiments": {
+            cls: sorted(val_df[val_df["Exp_Type"] == cls]["Experiment"].unique().tolist())
             for cls in CLASS_MAP
         },
         "train_indices": sorted(train_df["idx"].tolist()),
-        "test_indices": sorted(test_df["idx"].tolist()),
+        "val_indices": sorted(val_df["idx"].tolist()),
         "class_distribution": {
             "train": {cls: int((train_df["Exp_Type"] == cls).sum()) for cls in CLASS_MAP},
-            "test":  {cls: int((test_df["Exp_Type"] == cls).sum())  for cls in CLASS_MAP},
+            "val":   {cls: int((val_df["Exp_Type"] == cls).sum())   for cls in CLASS_MAP},
         },
     }
     with open(path, "w") as f:
@@ -145,8 +145,10 @@ def save_train_record(train_df: pd.DataFrame, test_df: pd.DataFrame,
 class FibrinDataset(Dataset):
     """PyTorch Dataset for fibrin clot images.
 
-    Images are loaded from disk on demand (not pre-loaded) to keep memory
-    usage manageable with 6000×4000 px source files.
+    By default images are loaded from disk on demand. When preload=True all
+    images are preprocessed at construction time and cached in RAM — this
+    eliminates per-epoch disk I/O at the cost of memory (~700 MB for the
+    original 10× min-pool pipeline over ~850 images).
 
     When augment=True the dataset is logically 4× the size of df: each base
     image appears as 4 consecutive entries (variants 0–3).  The variant index
@@ -157,15 +159,28 @@ class FibrinDataset(Dataset):
         photo_dir:   Directory containing 0000.JPG … 0858.JPG.
         preprocessor: Callable img_bgr → torch.Tensor (from make_preprocessor).
         augment:     If True, expose 4× the images with flip augmentations.
+        preload:     If True, preprocess all images into RAM at init time.
     """
 
     def __init__(self, df: pd.DataFrame, photo_dir: str,
-                 preprocessor: Callable, augment: bool = False):
+                 preprocessor: Callable, augment: bool = False,
+                 preload: bool = False):
         self.df = df.reset_index(drop=True)
         self.photo_dir = photo_dir
         self.preprocessor = preprocessor
         self.do_augment = augment
         self.multiplier = 4 if augment else 1
+        self._cache: Optional[List[torch.Tensor]] = None
+
+        if preload:
+            self._cache = []
+            for i in range(len(self.df)):
+                row = self.df.iloc[i]
+                img_path = os.path.join(self.photo_dir, f"{int(row['idx']):04d}.JPG")
+                img_bgr = cv2.imread(img_path)
+                if img_bgr is None:
+                    raise FileNotFoundError(f"Image not found: {img_path}")
+                self._cache.append(self.preprocessor(img_bgr))
 
     def __len__(self) -> int:
         return len(self.df) * self.multiplier
@@ -175,13 +190,16 @@ class FibrinDataset(Dataset):
         variant = idx % self.multiplier
 
         row = self.df.iloc[base_idx]
-        img_path = os.path.join(self.photo_dir, f"{int(row['idx']):04d}.JPG")
 
-        img_bgr = cv2.imread(img_path)
-        if img_bgr is None:
-            raise FileNotFoundError(f"Image not found: {img_path}")
+        if self._cache is not None:
+            tensor = self._cache[base_idx]
+        else:
+            img_path = os.path.join(self.photo_dir, f"{int(row['idx']):04d}.JPG")
+            img_bgr = cv2.imread(img_path)
+            if img_bgr is None:
+                raise FileNotFoundError(f"Image not found: {img_path}")
+            tensor = self.preprocessor(img_bgr)
 
-        tensor = self.preprocessor(img_bgr)          # (1, H, W) float32
         if self.do_augment:
             tensor = augment(tensor, variant)
 
@@ -227,34 +245,38 @@ def load_split_from_record(
     record_path: str,
     db_path: str,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Reconstruct the train/test DataFrames from a saved train_record.json.
+    """Reconstruct the train/validation DataFrames from a saved train_record.json.
 
     Reads the stored integer image indices (not a random re-split) so the
-    held-out test set is always identical regardless of when this is called.
+    held-out validation set is always identical regardless of when this is called.
+    Accepts both new-style val_* keys and legacy test_* keys for backward
+    compatibility with records written before the rename.
 
     Args:
         record_path: Path to a train_record.json produced by save_train_record().
         db_path:     Path to the SQLite database (for load_metadata).
 
     Returns:
-        (train_df, test_df) — same structure as split_by_experiment output.
+        (train_df, val_df) — same structure as split_by_experiment output.
     """
     with open(record_path) as f:
         record = json.load(f)
+
+    # Support both new val_* keys and legacy test_* keys
     train_indices = set(record["train_indices"])
-    test_indices  = set(record["test_indices"])
+    val_indices = set(record.get("val_indices", record.get("test_indices", [])))
 
     engine = get_engine(db_path)
     df = load_metadata(engine)
 
     train_df = df[df["idx"].isin(train_indices)].reset_index(drop=True)
-    test_df  = df[df["idx"].isin(test_indices)].reset_index(drop=True)
+    val_df   = df[df["idx"].isin(val_indices)].reset_index(drop=True)
 
-    assert len(train_df) + len(test_df) == len(train_indices) + len(test_indices), (
-        f"Record/DB mismatch: expected {len(train_indices)+len(test_indices)} images, "
-        f"got {len(train_df)+len(test_df)}"
+    assert len(train_df) + len(val_df) == len(train_indices) + len(val_indices), (
+        f"Record/DB mismatch: expected {len(train_indices)+len(val_indices)} images, "
+        f"got {len(train_df)+len(val_df)}"
     )
-    return train_df, test_df
+    return train_df, val_df
 
 
 def filter_classes(df: pd.DataFrame, classes: List[str]) -> pd.DataFrame:
@@ -284,59 +306,67 @@ def create_dataloaders(
     seed: int = 42,
     gray_method: str = "lab_l",
     pool_factor: int = 10,
-    num_workers: int = 4,
+    num_workers: int = None,
     train_record_path: str = "train_record.json",
+    preload: bool = False,
 ) -> Tuple[DataLoader, DataLoader, dict]:
     """End-to-end factory: DB → split → datasets → dataloaders.
 
     Args:
-        db_path:           Path to test_db.db.
+        db_path:           Path to endpoint10.db.
         photo_dir:         Directory containing numbered JPEGs.
         batch_size:        Images per mini-batch.
         train_ratio:       Approximate fraction assigned to training.
         seed:              Random seed for the split.
         gray_method:       Grayscale conversion method (see preprocessing.py).
         pool_factor:       Min-pool downsampling factor.
-        num_workers:       DataLoader worker processes for parallel loading.
+        num_workers:       DataLoader worker processes. Defaults to
+                           min(8, max(4, cpu_count - 2)).
         train_record_path: Where to write the JSON training record.
+        preload:           If True, load all images into RAM at startup.
 
     Returns:
-        (train_loader, test_loader, metadata_dict)
+        (train_loader, val_loader, metadata_dict)
         metadata_dict contains class_names, class_counts, split sizes.
     """
+    if num_workers is None:
+        num_workers = min(8, max(4, (os.cpu_count() or 4) - 2))
+
     engine = get_engine(db_path)
     df = load_metadata(engine)
-    train_df, test_df = split_by_experiment(df, train_ratio=train_ratio, seed=seed)
+    train_df, val_df = split_by_experiment(df, train_ratio=train_ratio, seed=seed)
 
-    save_train_record(train_df, test_df, train_record_path,
+    save_train_record(train_df, val_df, train_record_path,
                       seed=seed, train_ratio=train_ratio,
                       gray_method=gray_method, pool_factor=pool_factor)
 
     preprocessor = make_preprocessor(gray_method=gray_method, pool_factor=pool_factor)
 
-    train_ds = FibrinDataset(train_df, photo_dir, preprocessor, augment=True)
-    test_ds  = FibrinDataset(test_df,  photo_dir, preprocessor, augment=False)
+    train_ds = FibrinDataset(train_df, photo_dir, preprocessor,
+                             augment=True, preload=preload)
+    val_ds   = FibrinDataset(val_df,   photo_dir, preprocessor,
+                             augment=False, preload=preload)
 
     sampler = make_balanced_sampler(train_ds)
     train_loader = DataLoader(train_ds, batch_size=batch_size,
                               sampler=sampler, num_workers=num_workers,
-                              pin_memory=False)
-    test_loader  = DataLoader(test_ds,  batch_size=batch_size,
+                              pin_memory=False, persistent_workers=(num_workers > 0))
+    val_loader   = DataLoader(val_ds,   batch_size=batch_size,
                               shuffle=False, num_workers=num_workers,
-                              pin_memory=False)
+                              pin_memory=False, persistent_workers=(num_workers > 0))
 
     meta = {
         "class_names": CLASS_NAMES,
         "class_map": CLASS_MAP,
         "train_size": len(train_ds),
-        "test_size": len(test_ds),
+        "val_size": len(val_ds),
         "train_base_size": len(train_df),
-        "test_base_size": len(test_df),
+        "val_base_size": len(val_df),
         "train_class_counts": {
             cls: int((train_df["Exp_Type"] == cls).sum()) for cls in CLASS_MAP
         },
-        "test_class_counts": {
-            cls: int((test_df["Exp_Type"] == cls).sum()) for cls in CLASS_MAP
+        "val_class_counts": {
+            cls: int((val_df["Exp_Type"] == cls).sum()) for cls in CLASS_MAP
         },
     }
-    return train_loader, test_loader, meta
+    return train_loader, val_loader, meta

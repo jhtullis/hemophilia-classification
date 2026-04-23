@@ -27,7 +27,7 @@ from model import FibrinCNN
 from preprocessing import make_preprocessor
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
-DB_PATH    = "data/test_db.db"
+DB_PATH    = os.path.join(os.path.dirname(__file__), "data", "endpoint10.db")
 PHOTOS_DIR = "data/photos"
 GRAY_METHOD = "lab_l"
 POOL_FACTOR = 10
@@ -193,7 +193,7 @@ def plot_activation_maps(model: FibrinCNN, model_dir: str,
     record_path = os.path.join(model_dir, "train_record.json")
     if not os.path.exists(record_path):
         record_path = "models/5class/train_record.json"
-    _, test_df = load_split_from_record(record_path, DB_PATH)
+    _, test_df = load_split_from_record(record_path, args.db)
     if num_classes == 3:
         test_df = filter_classes(test_df, class_names)
 
@@ -277,6 +277,8 @@ def main() -> None:
     )
     parser.add_argument("--model-dir", default="models/5class", metavar="PATH",
                         help="Directory containing best_model.pth (default: models/5class).")
+    parser.add_argument("--db", default=DB_PATH, metavar="PATH",
+                        help="Path to SQLite database (default: data/endpoint10.db).")
     args = parser.parse_args()
 
     device = torch.device("cpu")

@@ -19,7 +19,7 @@ from data_loader import (
     split_by_experiment,
 )
 
-DB_PATH    = os.path.join(os.path.dirname(__file__), "data", "test_db.db")
+DB_PATH    = os.path.join(os.path.dirname(__file__), "data", "endpoint10.db")
 PHOTO_DIR  = os.path.join(os.path.dirname(__file__), "data", "photos")
 
 

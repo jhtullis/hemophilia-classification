@@ -5,6 +5,7 @@ Can be imported (use evaluate_model()) or run as a script:
     python evaluate.py
 """
 
+import argparse
 import os
 from typing import List, Tuple
 
@@ -16,7 +17,7 @@ from data_loader import CLASS_NAMES, FibrinDataset, load_split_from_record
 from model import FibrinCNN
 from preprocessing import make_preprocessor
 
-DB_PATH     = os.path.join(os.path.dirname(__file__), "data", "test_db.db")
+DB_PATH     = os.path.join(os.path.dirname(__file__), "data", "endpoint10.db")
 PHOTO_DIR   = os.path.join(os.path.dirname(__file__), "data", "photos")
 MODEL_PATH  = os.path.join(os.path.dirname(__file__), "models", "5class", "best_model.pth")
 RECORD_PATH = os.path.join(os.path.dirname(__file__), "models", "5class", "train_record.json")
@@ -146,6 +147,11 @@ def evaluate_model(model: FibrinCNN, loader: DataLoader,
 # ---------------------------------------------------------------------------
 
 def main():
+    parser = argparse.ArgumentParser(description="Evaluate the 5-class FibrinCNN.")
+    parser.add_argument("--db", default=DB_PATH, metavar="PATH",
+                        help="Path to SQLite database (default: data/endpoint10.db).")
+    args = parser.parse_args()
+
     device = torch.device("cpu")
 
     if not os.path.exists(MODEL_PATH):
@@ -156,17 +162,17 @@ def main():
     model = load_model(MODEL_PATH, device=device)
     print(model.summary())
 
-    print("\nLoading test data from saved split …")
-    _, test_df = load_split_from_record(RECORD_PATH, DB_PATH)
+    print("\nLoading validation data from saved split …")
+    _, val_df = load_split_from_record(RECORD_PATH, args.db)
     preprocessor = make_preprocessor(gray_method="lab_l", pool_factor=10)
-    test_ds = FibrinDataset(test_df, PHOTO_DIR, preprocessor, augment=False)
-    test_loader = DataLoader(test_ds, batch_size=16, shuffle=False,
-                             num_workers=4, pin_memory=False)
+    val_ds = FibrinDataset(val_df, PHOTO_DIR, preprocessor, augment=False)
+    val_loader = DataLoader(val_ds, batch_size=16, shuffle=False,
+                            num_workers=4, pin_memory=False)
 
-    print("Running inference on test set …")
-    results = evaluate_model(model, test_loader, device, CLASS_NAMES)
+    print("Running inference on validation set …")
+    results = evaluate_model(model, val_loader, device, CLASS_NAMES)
 
-    print(f"\nTest accuracy: {results['accuracy']:.4f}")
+    print(f"\nValidation accuracy: {results['accuracy']:.4f}")
     print(results["report_str"])
 
 

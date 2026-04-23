@@ -1,20 +1,26 @@
 """
-train.py — Training loop for FibrinCNN.
+train_5class.py — Training loop for the 5-class FibrinCNN.
 
 Run with:
-    python train.py
+    python train.py --model-type 5class [--preload]
 
-Outputs:
-    best_model.pth     — Weights of the epoch with the highest test accuracy
-    train_record.json  — Record of which images were assigned to training
+Or directly:
+    python train_5class.py [--preload]
+
+Outputs (models/5class/):
+    best_model.pth        Weights of the epoch with the highest validation accuracy
+    train_record.json     Record of which images were assigned to training
+    training_history.json Per-epoch train/val loss and accuracy
+    training_log.txt      Full stdout log
 """
 
+import argparse
+import json
 import os
 import sys
 import time
 from typing import Tuple
 
-import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -27,10 +33,12 @@ from model import FibrinCNN
 # Paths
 # ---------------------------------------------------------------------------
 
-DB_PATH   = os.path.join(os.path.dirname(__file__), "data", "test_db.db")
-PHOTO_DIR = os.path.join(os.path.dirname(__file__), "data", "photos")
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "5class", "best_model.pth")
-RECORD_PATH = os.path.join(os.path.dirname(__file__), "models", "5class", "train_record.json")
+_DIR = os.path.dirname(__file__)
+DB_PATH    = os.path.join(_DIR, "data", "endpoint10.db")
+PHOTO_DIR  = os.path.join(_DIR, "data", "photos")
+MODEL_DIR  = os.path.join(_DIR, "models", "5class")
+MODEL_PATH = os.path.join(MODEL_DIR, "best_model.pth")
+RECORD_PATH = os.path.join(MODEL_DIR, "train_record.json")
 
 # ---------------------------------------------------------------------------
 # Hyperparameters
@@ -44,7 +52,6 @@ TRAIN_RATIO  = 0.75
 SEED         = 42
 GRAY_METHOD  = "lab_l"
 POOL_FACTOR  = 10
-NUM_WORKERS  = 4
 
 
 # ---------------------------------------------------------------------------
@@ -93,14 +100,15 @@ def compute_class_weights(train_class_counts: dict,
 
 def train_one_epoch(model: FibrinCNN, loader: DataLoader,
                     criterion: nn.Module, optimizer: torch.optim.Optimizer,
-                    device: torch.device) -> float:
+                    device: torch.device) -> Tuple[float, float]:
     """Run one training epoch.
 
     Returns:
-        Average cross-entropy loss over all batches.
+        (avg_loss, accuracy) over all batches in the training set.
     """
     model.train()
     total_loss = 0.0
+    correct, total = 0, 0
     for images, labels in loader:
         images, labels = images.to(device), labels.to(device)
         optimizer.zero_grad()
@@ -109,58 +117,69 @@ def train_one_epoch(model: FibrinCNN, loader: DataLoader,
         loss.backward()
         optimizer.step()
         total_loss += loss.item() * len(labels)
-    return total_loss / len(loader.dataset)
+        correct += (logits.detach().argmax(dim=1) == labels).sum().item()
+        total += len(labels)
+    return total_loss / total, correct / total
 
 
-def quick_accuracy(model: FibrinCNN, loader: DataLoader,
-                   device: torch.device) -> float:
-    """Compute accuracy without storing all predictions (used during training)."""
+def evaluate_loader(model: FibrinCNN, loader: DataLoader,
+                    criterion: nn.Module,
+                    device: torch.device) -> Tuple[float, float]:
+    """Compute accuracy and average loss on a DataLoader without gradients.
+
+    Returns:
+        (accuracy, avg_loss)
+    """
     model.eval()
+    total_loss = 0.0
     correct, total = 0, 0
     with torch.no_grad():
         for images, labels in loader:
-            images = images.to(device)
-            preds = model(images).argmax(dim=1).cpu()
-            correct += (preds == labels).sum().item()
+            images, labels = images.to(device), labels.to(device)
+            logits = model(images)
+            total_loss += criterion(logits, labels).item() * len(labels)
+            correct += (logits.argmax(dim=1) == labels).sum().item()
             total += len(labels)
-    return correct / total if total > 0 else 0.0
+    return correct / total, total_loss / total
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
-def main():
-    log_path = os.path.join(os.path.dirname(MODEL_PATH), "training_log.txt")
+def main(preload: bool = False, db_path: str = DB_PATH):
+    os.makedirs(MODEL_DIR, exist_ok=True)
+    log_path = os.path.join(MODEL_DIR, "training_log.txt")
     print(f"Training log → {log_path}")
 
     with _Tee(log_path):
-        _main()
+        _main(preload=preload, db_path=db_path)
 
 
-def _main():
+def _main(preload: bool = False, db_path: str = DB_PATH):
+    torch.set_num_threads(os.cpu_count() or 4)
     device = torch.device("cpu")
     torch.manual_seed(SEED)
 
     # --- Data ---
-    print("Loading data and performing train/test split …")
-    train_loader, test_loader, meta = create_dataloaders(
-        db_path=DB_PATH,
+    print("Loading data and performing train/validation split …")
+    train_loader, val_loader, meta = create_dataloaders(
+        db_path=db_path,
         photo_dir=PHOTO_DIR,
         batch_size=BATCH_SIZE,
         train_ratio=TRAIN_RATIO,
         seed=SEED,
         gray_method=GRAY_METHOD,
         pool_factor=POOL_FACTOR,
-        num_workers=NUM_WORKERS,
         train_record_path=RECORD_PATH,
+        preload=preload,
     )
 
     print(f"\nClass names:  {meta['class_names']}")
     print(f"Train images (with 4× augmentation): {meta['train_size']}")
-    print(f"Test images:  {meta['test_size']}")
+    print(f"Validation images:  {meta['val_size']}")
     print("Train class counts (base):", meta["train_class_counts"])
-    print("Test class counts:        ", meta["test_class_counts"])
+    print("Validation class counts:  ", meta["val_class_counts"])
     print(f"\nTrain record saved to: {RECORD_PATH}")
 
     # --- Model ---
@@ -180,39 +199,60 @@ def _main():
 
     # --- Training loop ---
     best_acc = 0.0
+    history = {"train_loss": [], "train_accuracy": [],
+               "val_loss":   [], "val_accuracy":   []}
+
     print(f"\nTraining for {NUM_EPOCHS} epochs on {device} …\n")
-    print(f"{'Epoch':>6}  {'Train Loss':>12}  {'Test Acc':>10}  {'Time (s)':>10}")
-    print("-" * 45)
+    print(f"{'Epoch':>6}  {'Train Loss':>12}  {'Train Acc':>10}  "
+          f"{'Val Loss':>10}  {'Val Acc':>10}  {'Time (s)':>10}")
+    print("-" * 65)
 
     for epoch in range(1, NUM_EPOCHS + 1):
         t0 = time.time()
-        train_loss = train_one_epoch(model, train_loader, criterion,
-                                     optimizer, device)
-        test_acc = quick_accuracy(model, test_loader, device)
+        train_loss, train_acc = train_one_epoch(model, train_loader, criterion,
+                                                optimizer, device)
+        val_acc, val_loss = evaluate_loader(model, val_loader, criterion, device)
         elapsed = time.time() - t0
 
-        scheduler.step(test_acc)
+        history["train_loss"].append(train_loss)
+        history["train_accuracy"].append(train_acc)
+        history["val_loss"].append(val_loss)
+        history["val_accuracy"].append(val_acc)
 
-        # Save best model
-        if test_acc > best_acc:
-            best_acc = test_acc
+        scheduler.step(val_acc)
+
+        if val_acc > best_acc:
+            best_acc = val_acc
             torch.save(model.state_dict(), MODEL_PATH)
             tag = "  ← best"
         else:
             tag = ""
 
-        print(f"{epoch:>6}  {train_loss:>12.4f}  {test_acc:>10.4f}  "
-              f"{elapsed:>10.1f}{tag}")
+        print(f"{epoch:>6}  {train_loss:>12.4f}  {train_acc:>10.4f}  "
+              f"{val_loss:>10.4f}  {val_acc:>10.4f}  {elapsed:>10.1f}{tag}")
 
-    print(f"\nBest test accuracy: {best_acc:.4f}")
+    print(f"\nBest validation accuracy: {best_acc:.4f}")
     print(f"Best model saved to: {MODEL_PATH}")
 
+    # --- Save training history ---
+    history_path = os.path.join(MODEL_DIR, "training_history.json")
+    with open(history_path, "w") as f:
+        json.dump(history, f, indent=2)
+    print(f"Training history saved to: {history_path}")
+
     # --- Detailed evaluation of best model ---
-    print("\nDetailed evaluation of best model on test set:")
-    model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
-    results = evaluate_model(model, test_loader, device, meta["class_names"])
+    print("\nDetailed evaluation of best model on validation set:")
+    model.load_state_dict(torch.load(MODEL_PATH, map_location=device,
+                                     weights_only=True))
+    results = evaluate_model(model, val_loader, device, meta["class_names"])
     print(results["report_str"])
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--preload", action="store_true",
+                        help="Preload all images into RAM before training.")
+    parser.add_argument("--db", default=DB_PATH, metavar="PATH",
+                        help="Path to SQLite database (default: data/endpoint10.db).")
+    args = parser.parse_args()
+    main(preload=args.preload, db_path=args.db)

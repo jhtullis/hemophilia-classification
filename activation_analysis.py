@@ -28,7 +28,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from analysis_utils import (MODEL_REGISTRY, PHOTOS_DIR, get_test_split,
+from analysis_utils import (DB_PATH, MODEL_REGISTRY, PHOTOS_DIR, get_val_split,
                              load_model_from_registry)
 from preprocessing import make_preprocessor
 
@@ -51,6 +51,8 @@ def _parse_args():
                    help="Override output directory.")
     p.add_argument("--max-images", type=int, default=None, metavar="N",
                    help="Cap images processed (useful for quick testing).")
+    p.add_argument("--db", default=DB_PATH, metavar="PATH",
+                   help="Path to SQLite database (default: data/endpoint10.db).")
     return p.parse_args()
 
 
@@ -60,14 +62,14 @@ def _parse_args():
 
 def capture_activations_all(
     model,
-    test_df: pd.DataFrame,
+    val_df: pd.DataFrame,
     photos_dir: str,
     device: torch.device,
     preprocessor,
     class_map: dict,
     class_names: List[str],
 ) -> Tuple[pd.DataFrame, Dict[int, Dict[int, np.ndarray]]]:
-    """Run all test images through the model, capturing activations and predictions.
+    """Run all validation images through the model, capturing activations and predictions.
 
     Returns:
         results_df: per-image DataFrame (idx, Exp_Type, Slide_Type, Experiment,
@@ -89,7 +91,7 @@ def capture_activations_all(
 
     model.eval()
     with torch.no_grad():
-        for _, row in test_df.iterrows():
+        for _, row in val_df.iterrows():
             img_path = os.path.join(photos_dir, f"{int(row['idx']):04d}.JPG")
             img_bgr = cv2.imread(img_path)
             if img_bgr is None:
@@ -345,18 +347,18 @@ def main() -> None:
     print(f"Loading {args.model_type} model ...")
     model, model_dir, _, class_map, class_names = \
         load_model_from_registry(args.model_type, device)
-    test_df = get_test_split(args.model_type)
+    val_df = get_val_split(args.model_type, db_path=args.db)
     if args.max_images:
-        test_df = test_df.head(args.max_images)
+        val_df = val_df.head(args.max_images)
         print(f"  (capped at {args.max_images} images)")
 
     preprocessor = make_preprocessor(gray_method="lab_l", pool_factor=10)
     out_dir = args.output_dir or os.path.join(model_dir, "analysis", "activation")
     Path(out_dir).mkdir(parents=True, exist_ok=True)
 
-    print(f"Capturing activations for {len(test_df)} images ...")
+    print(f"Capturing activations for {len(val_df)} images ...")
     results_df, act_dict = capture_activations_all(
-        model, test_df, PHOTOS_DIR, device, preprocessor, class_map, class_names
+        model, val_df, PHOTOS_DIR, device, preprocessor, class_map, class_names
     )
     acc = results_df["correct"].mean()
     print(f"  Accuracy on this subset: {acc:.4f}")

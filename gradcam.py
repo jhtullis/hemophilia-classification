@@ -41,7 +41,7 @@ from preprocessing import make_preprocessor
 
 GRADCAM_LAYER_IDX = 14      # model.features[14] = ReLU after Conv4, before MaxPool4
                              # spatial size: (256, 75, 50)
-DB_PATH    = os.path.join(os.path.dirname(__file__), "data", "test_db.db")
+DB_PATH    = os.path.join(os.path.dirname(__file__), "data", "endpoint10.db")
 PHOTOS_DIR = os.path.join(os.path.dirname(__file__), "data", "photos")
 HEMOPHILIA_CLASSES = ["F08D", "F09D", "F11D"]
 CLASS_MAP_3 = {"F08D": 0, "F09D": 1, "F11D": 2}
@@ -60,6 +60,8 @@ def _parse_args():
                    help="Override output directory.")
     p.add_argument("--misclassified-only", action="store_true",
                    help="Only generate Grad-CAM for misclassified images.")
+    p.add_argument("--db", default=DB_PATH, metavar="PATH",
+                   help="Path to SQLite database (default: data/endpoint10.db).")
     return p.parse_args()
 
 
@@ -436,9 +438,9 @@ def main() -> None:
     inv_class_map = {v: k for k, v in class_map.items()}
 
     record_path = os.path.join("models", "5class", "train_record.json")
-    _, test_df = load_split_from_record(record_path, DB_PATH)
+    _, val_df = load_split_from_record(record_path, args.db)
     if num_classes == 3:
-        test_df = filter_classes(test_df, HEMOPHILIA_CLASSES)
+        val_df = filter_classes(val_df, HEMOPHILIA_CLASSES)
 
     preprocessor = make_preprocessor(gray_method="lab_l", pool_factor=10)
 
@@ -448,8 +450,8 @@ def main() -> None:
     for d in [out_dir, rep_dir, misc_dir]:
         Path(d).mkdir(parents=True, exist_ok=True)
 
-    print(f"Collecting predictions for {len(test_df)} test images ...")
-    results = _collect_results(model, test_df, PHOTOS_DIR, device,
+    print(f"Collecting predictions for {len(val_df)} validation images ...")
+    results = _collect_results(model, val_df, PHOTOS_DIR, device,
                                 preprocessor, class_map)
     n_correct   = sum(1 for r in results if r["correct"])
     n_incorrect = len(results) - n_correct

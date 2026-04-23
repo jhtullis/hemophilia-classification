@@ -5,8 +5,8 @@ Provides:
   - MODEL_REGISTRY       dict mapping model-type string → (model_dir, num_classes, class_map)
   - CLASS_COLORS         consistent color palette for plots
   - load_model_from_registry(model_type, device)  → (model, model_dir, num_classes, class_map, class_names)
-  - run_inference_full(model, test_df, ...)        → pd.DataFrame with per-image predictions + metadata
-  - get_test_split(model_type)                     → test_df
+  - run_inference_full(model, val_df, ...)         → pd.DataFrame with per-image predictions + metadata
+  - get_val_split(model_type)                      → val_df
 """
 
 import os
@@ -26,7 +26,7 @@ from preprocessing import make_preprocessor
 # Paths
 # ---------------------------------------------------------------------------
 
-DB_PATH    = os.path.join(os.path.dirname(__file__), "data", "test_db.db")
+DB_PATH    = os.path.join(os.path.dirname(__file__), "data", "endpoint10.db")
 PHOTOS_DIR = os.path.join(os.path.dirname(__file__), "data", "photos")
 GRAY_METHOD = "lab_l"
 POOL_FACTOR = 10
@@ -96,23 +96,27 @@ def load_model_from_registry(
 # Test split loading
 # ---------------------------------------------------------------------------
 
-def get_test_split(model_type: str, db_path: str = DB_PATH) -> pd.DataFrame:
-    """Load the test DataFrame for a given model type.
+def get_val_split(model_type: str, db_path: str = DB_PATH) -> pd.DataFrame:
+    """Load the validation DataFrame for a given model type.
 
     Always uses models/5class/train_record.json as the canonical split.
     For 3-class models, filters to the hemophilia classes.
 
     Returns:
-        test_df with columns: idx, Experiment, Exp_Type, Slide_Type, ...
+        val_df with columns: idx, Experiment, Exp_Type, Slide_Type, ...
     """
     record_path = os.path.join("models", "5class", "train_record.json")
-    _, test_df = load_split_from_record(record_path, db_path)
+    _, val_df = load_split_from_record(record_path, db_path)
 
     _, num_classes, _ = MODEL_REGISTRY[model_type]
     if num_classes == 3:
-        test_df = filter_classes(test_df, HEMOPHILIA_CLASSES)
+        val_df = filter_classes(val_df, HEMOPHILIA_CLASSES)
 
-    return test_df
+    return val_df
+
+
+# Keep legacy alias for backward compatibility
+get_test_split = get_val_split
 
 
 # ---------------------------------------------------------------------------
@@ -121,18 +125,18 @@ def get_test_split(model_type: str, db_path: str = DB_PATH) -> pd.DataFrame:
 
 def run_inference_full(
     model,
-    test_df: pd.DataFrame,
+    val_df: pd.DataFrame,
     photos_dir: str,
     device: torch.device,
     preprocessor,
     class_map: dict,
     class_names: List[str],
 ) -> pd.DataFrame:
-    """Run inference on all test images and return a rich per-image DataFrame.
+    """Run inference on all validation images and return a rich per-image DataFrame.
 
     Args:
         model:        FibrinCNN in eval mode.
-        test_df:      DataFrame from load_split_from_record (or filter_classes subset).
+        val_df:       DataFrame from load_split_from_record (or filter_classes subset).
         photos_dir:   Path to directory containing 0000.JPG ... 0858.JPG.
         device:       torch.device.
         preprocessor: Callable img_bgr → tensor (from make_preprocessor).
@@ -146,7 +150,7 @@ def run_inference_full(
           prob_<class0>, prob_<class1>, ...
     """
     true_labels, probs, img_indices = collect_predictions(
-        model, test_df, photos_dir, device, preprocessor, class_map=class_map
+        model, val_df, photos_dir, device, preprocessor, class_map=class_map
     )
 
     # Build base DataFrame
@@ -159,8 +163,8 @@ def run_inference_full(
            for i, name in enumerate(class_names)},
     })
 
-    # Join metadata from test_df (Experiment, Exp_Type, Slide_Type)
-    meta = test_df[["idx", "Experiment", "Exp_Type", "Slide_Type"]].copy()
+    # Join metadata from val_df (Experiment, Exp_Type, Slide_Type)
+    meta = val_df[["idx", "Experiment", "Exp_Type", "Slide_Type"]].copy()
     meta["idx"] = meta["idx"].astype(np.int32)
     df = df.merge(meta, on="idx", how="left")
 

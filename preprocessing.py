@@ -15,6 +15,23 @@ from functools import partial
 
 
 # ---------------------------------------------------------------------------
+# Orientation normalisation
+# ---------------------------------------------------------------------------
+
+def ensure_landscape(img_bgr: np.ndarray) -> np.ndarray:
+    """Rotate portrait-oriented images 90° clockwise to landscape.
+
+    All images are expected to be 6000×4000 (width > height). If a JPEG was
+    captured or saved in portrait orientation the raw array will have height >
+    width; this rotates it back to the orientation the rest of the pipeline
+    assumes.
+    """
+    if img_bgr.shape[0] > img_bgr.shape[1]:
+        return cv2.rotate(img_bgr, cv2.ROTATE_90_CLOCKWISE)
+    return img_bgr
+
+
+# ---------------------------------------------------------------------------
 # Grayscale conversion
 # ---------------------------------------------------------------------------
 
@@ -107,6 +124,7 @@ def preprocess(img_bgr: np.ndarray,
         torch.Tensor of shape (1, H // pool_factor, W // pool_factor),
         dtype float32, values in [0, 1].
     """
+    img_bgr = ensure_landscape(img_bgr)
     gray = to_grayscale(img_bgr, method=gray_method)          # (H, W) uint8
     pooled = min_pool(gray, factor=pool_factor)                # (H/f, W/f) uint8
     normalized = pooled.astype(np.float32) / 255.0            # [0, 1] float32

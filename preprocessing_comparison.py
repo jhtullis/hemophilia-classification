@@ -32,11 +32,11 @@ from data_loader import (CLASS_MAP, CLASS_NAMES, FibrinDataset,
                          filter_classes, load_split_from_record)
 from evaluate import confusion_matrix as compute_cm
 from hemophilia_analysis import _MODEL_REGISTRY, load_model
-from preprocessing import make_preprocessor, min_pool, to_grayscale
+from preprocessing import ensure_landscape, make_preprocessor, min_pool, to_grayscale
 
 GRAY_METHODS   = ["lab_l", "luminance", "hsv_v", "hsv_s", "green"]
 POOL_FACTOR    = 10
-DB_PATH        = os.path.join(os.path.dirname(__file__), "data", "test_db.db")
+DB_PATH        = os.path.join(os.path.dirname(__file__), "data", "endpoint10.db")
 PHOTOS_DIR     = os.path.join(os.path.dirname(__file__), "data", "photos")
 HEMOPHILIA_CLS = ["F08D", "F09D", "F11D"]
 CLASS_MAP_3    = {"F08D": 0, "F09D": 1, "F11D": 2}
@@ -64,6 +64,8 @@ def _parse_args():
                    help="Which trained model to analyse (default: 5class).")
     p.add_argument("--output-dir", default=None, metavar="DIR",
                    help="Override output directory.")
+    p.add_argument("--db", default=DB_PATH, metavar="PATH",
+                   help="Path to SQLite database (default: data/endpoint10.db).")
     return p.parse_args()
 
 
@@ -71,15 +73,15 @@ def _parse_args():
 # Data helpers
 # ---------------------------------------------------------------------------
 
-def _load_test_df(model_type: str):
-    """Return (test_df, class_names, num_classes, class_map)."""
+def _load_val_df(model_type: str, db_path: str = DB_PATH):
+    """Return (val_df, class_names, num_classes, class_map)."""
     record_path = os.path.join("models", "5class", "train_record.json")
-    _, test_df = load_split_from_record(record_path, DB_PATH)
+    _, val_df = load_split_from_record(record_path, db_path)
     _, num_classes, class_map = _MODEL_REGISTRY[model_type]
     if num_classes == 3:
-        test_df = filter_classes(test_df, HEMOPHILIA_CLS)
-        return test_df, CLASS_NAMES_3, 3, CLASS_MAP_3
-    return test_df, CLASS_NAMES, 5, CLASS_MAP
+        val_df = filter_classes(val_df, HEMOPHILIA_CLS)
+        return val_df, CLASS_NAMES_3, 3, CLASS_MAP_3
+    return val_df, CLASS_NAMES, 5, CLASS_MAP
 
 
 class _FibrinDataset3(FibrinDataset):
@@ -114,18 +116,18 @@ def _f1_from_cm(cm: np.ndarray, class_names: List[str]) -> Dict[str, float]:
 # Output A: method_visual_comparison.png
 # ---------------------------------------------------------------------------
 
-def plot_visual_comparison(test_df: pd.DataFrame, class_names: List[str],
+def plot_visual_comparison(val_df: pd.DataFrame, class_names: List[str],
                            out_dir: str) -> None:
     # One representative image per class (smallest idx)
     rep: Dict[str, np.ndarray] = {}
     for cls in class_names:
-        rows = test_df[test_df["Exp_Type"] == cls].sort_values("idx")
+        rows = val_df[val_df["Exp_Type"] == cls].sort_values("idx")
         if rows.empty:
             continue
         idx = int(rows.iloc[0]["idx"])
         img = cv2.imread(os.path.join(PHOTOS_DIR, f"{idx:04d}.JPG"))
         if img is not None:
-            rep[cls] = img
+            rep[cls] = ensure_landscape(img)
 
     n_cls = len(rep)
     n_mth = len(GRAY_METHODS)
@@ -162,7 +164,7 @@ def plot_visual_comparison(test_df: pd.DataFrame, class_names: List[str],
 
 def run_accuracy_comparison(
     model,
-    test_df,
+    val_df,
     class_names: List[str],
     num_classes: int,
     class_map: dict,
@@ -176,9 +178,9 @@ def run_accuracy_comparison(
         preprocessor = make_preprocessor(gray_method=method, pool_factor=POOL_FACTOR)
 
         if num_classes == 3:
-            ds = _FibrinDataset3(test_df, PHOTOS_DIR, preprocessor, class_map)
+            ds = _FibrinDataset3(val_df, PHOTOS_DIR, preprocessor, class_map)
         else:
-            ds = FibrinDataset(test_df, PHOTOS_DIR, preprocessor, augment=False)
+            ds = FibrinDataset(val_df, PHOTOS_DIR, preprocessor, augment=False)
 
         loader = DataLoader(ds, batch_size=16, shuffle=False,
                             num_workers=4, pin_memory=False)
@@ -333,7 +335,7 @@ def write_report(records: List[dict], class_names: List[str],
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    import pandas as pd  # local for _load_test_df return type annotation
+    import pandas as pd  # local for _load_val_df return type annotation
     args  = _parse_args()
     device = torch.device("cpu")
 
@@ -341,23 +343,23 @@ def main() -> None:
     model_path = os.path.join(model_dir, "best_model.pth")
     model = load_model(model_path, device=device, num_classes=num_classes)
 
-    test_df, class_names, num_classes, class_map = _load_test_df(args.model_type)
+    val_df, class_names, num_classes, class_map = _load_val_df(args.model_type, db_path=args.db)
 
     out_dir = args.output_dir or os.path.join(model_dir, "analysis", "preprocessing")
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     print(f"Outputs → {out_dir}/\n")
 
     print("Visual comparison of preprocessing methods ...")
-    plot_visual_comparison(test_df, class_names, out_dir)
+    plot_visual_comparison(val_df, class_names, out_dir)
 
     print("\nAccuracy evaluation for each method ...")
-    records = run_accuracy_comparison(model, test_df, class_names,
+    records = run_accuracy_comparison(model, val_df, class_names,
                                       num_classes, class_map, device, out_dir)
 
     print("\nBar chart ...")
     plot_accuracy_bars(records, class_names, out_dir)
 
-    write_report(records, class_names, args.model_type, len(test_df), out_dir)
+    write_report(records, class_names, args.model_type, len(val_df), out_dir)
     print("\nDone.")
 
 

@@ -12,47 +12,29 @@ Two modes selectable via --mode:
                                    feature extractor is frozen.
               Phase 2 (25 epochs): all layers fine-tune with a smaller LR.
 
-Both modes reuse the SAME train/test split that was used for the 5-class model
-(loaded from models/5class/train_record.json) to ensure fair comparison.
+Both modes reuse the SAME train/validation split that was used for the 5-class
+model (loaded from models/5class/train_record.json) to ensure fair comparison.
 
-Discussion: scratch vs. fine-tune vs. 5-class model
------------------------------------------------------
-  Scratch model:
-    + Optimises decision boundaries purely for the 3-class problem.
-    + More data-efficient: class-balanced sampling over fewer classes.
-    - Starts from random weights; needs the full training budget to converge.
+Run with:
+    python train.py --model-type 3class_scratch [--preload]
+    python train.py --model-type 3class_finetune [--preload]
 
-  Fine-tune model:
-    + The pre-trained feature extractor already encodes fibrin-relevant
-      texture features learned from all 5 classes.
-    + Phase 1 quickly adapts the classification head; Phase 2 allows subtle
-      feature-level adjustments with a conservative LR.
-    - Risk of negative transfer if 5-class features are sub-optimal for the
-      3-class discrimination task (unlikely here since AC3/NC1 textures are
-      quite distinct from the hemophilia classes).
-    - Requires a trained 5-class checkpoint to exist.
-
-  Expected outcome:
-    The fine-tune model typically converges faster and to a comparable or
-    slightly better accuracy than scratch, especially when the training set
-    is small (here ~460 hemophilia training images).  The 5-class model may
-    score lower on the 3-class task because its decision boundaries must also
-    accommodate AC3 and NC1, which can reduce margin between the hemophilia
-    classes.  Use `python hemophilia_analysis.py --compare` to verify
-    empirically once all three models are trained.
+Or directly:
+    python train_3class.py --mode scratch [--preload]
+    python train_3class.py --mode finetune [--preload]
 
 Outputs (saved to MODEL_DIR):
-  best_model.pth       Weights of the best epoch (highest test accuracy)
-  train_record.json    Record of the train/test split used
-
-Usage:
-    python train_3class.py --mode scratch
-    python train_3class.py --mode finetune
+  best_model.pth        Weights of the best epoch (highest validation accuracy)
+  train_record.json     Record of the train/validation split used
+  training_history.json Per-epoch train/val loss and accuracy
 """
 
+import argparse
+import json
 import os
 import sys
 import time
+from typing import Dict, List, Tuple
 
 import torch
 import torch.nn as nn
@@ -66,12 +48,11 @@ from model import FibrinCNN
 from preprocessing import make_preprocessor
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-DB_PATH       = os.path.join(os.path.dirname(__file__), "data", "test_db.db")
-PHOTO_DIR     = os.path.join(os.path.dirname(__file__), "data", "photos")
-RECORD_5CLASS = os.path.join(os.path.dirname(__file__), "models", "5class",
-                              "train_record.json")
-MODEL_5CLASS  = os.path.join(os.path.dirname(__file__), "models", "5class",
-                              "best_model.pth")
+_DIR          = os.path.dirname(__file__)
+DB_PATH       = os.path.join(_DIR, "data", "endpoint10.db")
+PHOTO_DIR     = os.path.join(_DIR, "data", "photos")
+RECORD_5CLASS = os.path.join(_DIR, "models", "5class", "train_record.json")
+MODEL_5CLASS  = os.path.join(_DIR, "models", "5class", "best_model.pth")
 
 # ── 3-class label mapping ─────────────────────────────────────────────────────
 HEMO_CLASSES  = ["F08D", "F09D", "F11D"]
@@ -86,7 +67,6 @@ WEIGHT_DECAY  = 1e-4
 EPOCHS_TOTAL  = 30
 EPOCHS_PHASE1 = 5      # finetune: head-only warmup
 EPOCHS_PHASE2 = 25     # finetune: full unfreeze (must sum to EPOCHS_TOTAL)
-NUM_WORKERS   = 4
 GRAY_METHOD   = "lab_l"
 POOL_FACTOR   = 10
 SEED          = 42
@@ -149,14 +129,15 @@ def _train_one_epoch(model: FibrinCNN, loader: DataLoader,
                      criterion: nn.Module,
                      optimizer: torch.optim.Optimizer,
                      device: torch.device,
-                     freeze_features: bool = False) -> float:
+                     freeze_features: bool = False) -> Tuple[float, float]:
+    """Returns (avg_loss, accuracy) for one training epoch."""
     model.train()
     if freeze_features:
-        # Keep BN running stats frozen during Phase 1 head-only training
         model.features.eval()
         model.global_pool.eval()
 
     total_loss = 0.0
+    correct, total = 0, 0
     for images, labels in loader:
         images, labels = images.to(device), labels.to(device)
         optimizer.zero_grad()
@@ -165,61 +146,86 @@ def _train_one_epoch(model: FibrinCNN, loader: DataLoader,
         loss.backward()
         optimizer.step()
         total_loss += loss.item() * len(labels)
-    return total_loss / len(loader.dataset)
+        correct += (logits.detach().argmax(dim=1) == labels).sum().item()
+        total   += len(labels)
+    return total_loss / total, correct / total
 
 
-def _quick_accuracy(model: FibrinCNN, loader: DataLoader,
-                    device: torch.device) -> float:
+def _evaluate_loader(model: FibrinCNN, loader: DataLoader,
+                     criterion: nn.Module,
+                     device: torch.device) -> Tuple[float, float]:
+    """Returns (accuracy, avg_loss) on a DataLoader without gradients."""
     model.eval()
+    total_loss = 0.0
     correct, total = 0, 0
     with torch.no_grad():
         for images, labels in loader:
-            images = images.to(device)
-            preds  = model(images).argmax(dim=1).cpu()
-            correct += (preds == labels).sum().item()
+            images, labels = images.to(device), labels.to(device)
+            logits = model(images)
+            total_loss += criterion(logits, labels).item() * len(labels)
+            correct += (logits.argmax(dim=1) == labels).sum().item()
             total   += len(labels)
-    return correct / total if total > 0 else 0.0
+    return correct / total, total_loss / total
 
 
-def _build_loaders(train_df, test_df, preprocessor):
-    train_ds = FibrinDataset3(train_df, PHOTO_DIR, preprocessor, augment=True)
-    test_ds  = FibrinDataset3(test_df,  PHOTO_DIR, preprocessor, augment=False)
+def _build_loaders(train_df, val_df, preprocessor, preload: bool = False):
+    num_workers = min(8, max(4, (os.cpu_count() or 4) - 2))
+    train_ds = FibrinDataset3(train_df, PHOTO_DIR, preprocessor,
+                              augment=True, preload=preload)
+    val_ds   = FibrinDataset3(val_df,   PHOTO_DIR, preprocessor,
+                              augment=False, preload=preload)
     sampler  = make_balanced_sampler(train_ds)
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, sampler=sampler,
-                              num_workers=NUM_WORKERS, pin_memory=False)
-    test_loader  = DataLoader(test_ds,  batch_size=BATCH_SIZE, shuffle=False,
-                              num_workers=NUM_WORKERS, pin_memory=False)
-    return train_loader, test_loader
+                              num_workers=num_workers, pin_memory=False,
+                              persistent_workers=(num_workers > 0))
+    val_loader   = DataLoader(val_ds,   batch_size=BATCH_SIZE, shuffle=False,
+                              num_workers=num_workers, pin_memory=False,
+                              persistent_workers=(num_workers > 0))
+    return train_loader, val_loader
 
 
-def _epoch_loop(model, train_loader, test_loader, criterion, optimizer,
+def _epoch_loop(model, train_loader, val_loader, criterion, optimizer,
                 scheduler, device, num_epochs, model_path,
-                freeze_features=False, start_epoch=1):
-    """Run training loop, return best accuracy achieved."""
+                freeze_features=False, start_epoch=1) -> Dict[str, List[float]]:
+    """Run training loop; return per-epoch history dict."""
     best_acc = 0.0
+    history: Dict[str, List[float]] = {
+        "train_loss": [], "train_accuracy": [],
+        "val_loss":   [], "val_accuracy":   [],
+    }
     for epoch in range(start_epoch, start_epoch + num_epochs):
         t0 = time.time()
-        loss = _train_one_epoch(model, train_loader, criterion, optimizer,
-                                device, freeze_features=freeze_features)
-        acc  = _quick_accuracy(model, test_loader, device)
+        train_loss, train_acc = _train_one_epoch(
+            model, train_loader, criterion, optimizer, device,
+            freeze_features=freeze_features)
+        val_acc, val_loss = _evaluate_loader(model, val_loader, criterion, device)
         elapsed = time.time() - t0
-        scheduler.step(acc)
 
-        if acc > best_acc:
-            best_acc = acc
+        history["train_loss"].append(train_loss)
+        history["train_accuracy"].append(train_acc)
+        history["val_loss"].append(val_loss)
+        history["val_accuracy"].append(val_acc)
+
+        scheduler.step(val_acc)
+
+        if val_acc > best_acc:
+            best_acc = val_acc
             torch.save(model.state_dict(), model_path)
             tag = "  <- best"
         else:
             tag = ""
-        print(f"{epoch:>6}  {loss:>12.4f}  {acc:>10.4f}  {elapsed:>10.1f}{tag}")
-    return best_acc
+        print(f"{epoch:>6}  {train_loss:>12.4f}  {train_acc:>10.4f}  "
+              f"{val_loss:>10.4f}  {val_acc:>10.4f}  {elapsed:>10.1f}{tag}")
+    return history
 
 
 # ── Mode: scratch ─────────────────────────────────────────────────────────────
 
-def train_scratch(model_dir: str, train_df, test_df, device: torch.device) -> None:
+def train_scratch(model_dir: str, train_df, val_df,
+                  device: torch.device, preload: bool = False) -> Dict:
     preprocessor = make_preprocessor(gray_method=GRAY_METHOD, pool_factor=POOL_FACTOR)
-    train_loader, test_loader = _build_loaders(train_df, test_df, preprocessor)
+    train_loader, val_loader = _build_loaders(train_df, val_df, preprocessor,
+                                              preload=preload)
 
     model     = FibrinCNN(num_classes=3).to(device)
     weights   = _compute_class_weights(train_df, device)
@@ -232,19 +238,22 @@ def train_scratch(model_dir: str, train_df, test_df, device: torch.device) -> No
     model_path = os.path.join(model_dir, "best_model.pth")
 
     print(f"\nTraining 3-class model from scratch for {EPOCHS_TOTAL} epochs …\n")
-    print(f"{'Epoch':>6}  {'Train Loss':>12}  {'Test Acc':>10}  {'Time (s)':>10}")
-    print("-" * 45)
+    print(f"{'Epoch':>6}  {'Train Loss':>12}  {'Train Acc':>10}  "
+          f"{'Val Loss':>10}  {'Val Acc':>10}  {'Time (s)':>10}")
+    print("-" * 65)
 
-    best = _epoch_loop(model, train_loader, test_loader, criterion, optimizer,
-                       scheduler, device, EPOCHS_TOTAL, model_path)
-    print(f"\nBest test accuracy: {best:.4f}")
-    print(f"Weights saved to:   {model_path}")
+    history = _epoch_loop(model, train_loader, val_loader, criterion, optimizer,
+                          scheduler, device, EPOCHS_TOTAL, model_path)
+    best = max(history["val_accuracy"])
+    print(f"\nBest validation accuracy: {best:.4f}")
+    print(f"Weights saved to:         {model_path}")
+    return history
 
 
 # ── Mode: finetune ────────────────────────────────────────────────────────────
 
-def train_finetune(model_dir: str, train_df, test_df,
-                   device: torch.device) -> None:
+def train_finetune(model_dir: str, train_df, val_df,
+                   device: torch.device, preload: bool = False) -> Dict:
     if not os.path.exists(MODEL_5CLASS):
         raise FileNotFoundError(
             f"5-class model not found at {MODEL_5CLASS}. "
@@ -252,15 +261,13 @@ def train_finetune(model_dir: str, train_df, test_df,
         )
 
     preprocessor = make_preprocessor(gray_method=GRAY_METHOD, pool_factor=POOL_FACTOR)
-    train_loader, test_loader = _build_loaders(train_df, test_df, preprocessor)
+    train_loader, val_loader = _build_loaders(train_df, val_df, preprocessor,
+                                              preload=preload)
 
-    # Load 5-class weights and replace the output layer
     model = FibrinCNN(num_classes=5)
     model.load_state_dict(
         torch.load(MODEL_5CLASS, map_location=device, weights_only=True)
     )
-    # classifier: Sequential(Linear(256,128), ReLU, Dropout(0.5), Linear(128,5))
-    # index -1 = Linear(128,5) — replace with Linear(128,3)
     model.classifier[-1] = nn.Linear(128, 3)
     model.to(device)
 
@@ -279,12 +286,12 @@ def train_finetune(model_dir: str, train_df, test_df,
     )
 
     print(f"\nPhase 1 — head-only training ({EPOCHS_PHASE1} epochs) …\n")
-    print(f"{'Epoch':>6}  {'Train Loss':>12}  {'Test Acc':>10}  {'Time (s)':>10}")
-    print("-" * 45)
-    # Phase 1 is warmup: do NOT save checkpoint here (use model_path only in Phase 2)
-    _epoch_loop(model, train_loader, test_loader, criterion, opt1, sched1,
-                device, EPOCHS_PHASE1, model_path,
-                freeze_features=True, start_epoch=1)
+    print(f"{'Epoch':>6}  {'Train Loss':>12}  {'Train Acc':>10}  "
+          f"{'Val Loss':>10}  {'Val Acc':>10}  {'Time (s)':>10}")
+    print("-" * 65)
+    history1 = _epoch_loop(model, train_loader, val_loader, criterion, opt1, sched1,
+                            device, EPOCHS_PHASE1, model_path,
+                            freeze_features=True, start_epoch=1)
 
     # ── Phase 2: unfreeze all layers, fine-tune with smaller LR ──
     model.requires_grad_(True)
@@ -295,38 +302,49 @@ def train_finetune(model_dir: str, train_df, test_df,
     )
 
     print(f"\nPhase 2 — full fine-tune ({EPOCHS_PHASE2} epochs, LR={LR_FULL}) …\n")
-    print(f"{'Epoch':>6}  {'Train Loss':>12}  {'Test Acc':>10}  {'Time (s)':>10}")
-    print("-" * 45)
-    best = _epoch_loop(model, train_loader, test_loader, criterion, opt2, sched2,
-                       device, EPOCHS_PHASE2, model_path,
-                       freeze_features=False,
-                       start_epoch=EPOCHS_PHASE1 + 1)
+    print(f"{'Epoch':>6}  {'Train Loss':>12}  {'Train Acc':>10}  "
+          f"{'Val Loss':>10}  {'Val Acc':>10}  {'Time (s)':>10}")
+    print("-" * 65)
+    history2 = _epoch_loop(model, train_loader, val_loader, criterion, opt2, sched2,
+                            device, EPOCHS_PHASE2, model_path,
+                            freeze_features=False,
+                            start_epoch=EPOCHS_PHASE1 + 1)
 
-    print(f"\nBest Phase-2 test accuracy: {best:.4f}")
-    print(f"Weights saved to:           {model_path}")
+    best = max(history2["val_accuracy"])
+    print(f"\nBest Phase-2 validation accuracy: {best:.4f}")
+    print(f"Weights saved to:                 {model_path}")
+
+    # Concatenate history across both phases
+    history = {k: history1[k] + history2[k] for k in history1}
+    return history
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-def main() -> None:
-    import argparse
-    parser = argparse.ArgumentParser(
-        description="Train a 3-class hemophilia CNN.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__,
-    )
-    parser.add_argument("--mode", choices=["scratch", "finetune"], required=True,
-                        help="Training mode: 'scratch' (random init) or "
-                             "'finetune' (from 5-class weights).")
-    args = parser.parse_args()
+def main(mode: str = None, preload: bool = False, db_path: str = DB_PATH) -> None:
+    if mode is None:
+        parser = argparse.ArgumentParser(
+            description="Train a 3-class hemophilia CNN.",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            epilog=__doc__,
+        )
+        parser.add_argument("--mode", choices=["scratch", "finetune"], required=True)
+        parser.add_argument("--preload", action="store_true",
+                            help="Preload all images into RAM before training.")
+        parser.add_argument("--db", default=DB_PATH, metavar="PATH",
+                            help="Path to SQLite database (default: data/endpoint10.db).")
+        args = parser.parse_args()
+        mode = args.mode
+        preload = args.preload
+        db_path = args.db
 
     device = torch.device("cpu")
+    torch.set_num_threads(os.cpu_count() or 4)
     torch.manual_seed(SEED)
 
     model_dir = os.path.join(
-        os.path.dirname(__file__),
-        "models",
-        "3class_hemo" if args.mode == "scratch" else "3class_hemo_finetune",
+        _DIR, "models",
+        "3class_hemo" if mode == "scratch" else "3class_hemo_finetune",
     )
     os.makedirs(model_dir, exist_ok=True)
 
@@ -334,44 +352,51 @@ def main() -> None:
     print(f"Training log → {log_path}")
 
     with _Tee(log_path):
-        _main_inner(args, device, model_dir)
+        _main_inner(mode, device, model_dir, preload=preload, db_path=db_path)
 
 
-def _main_inner(args, device, model_dir) -> None:
+def _main_inner(mode: str, device: torch.device, model_dir: str,
+                preload: bool = False, db_path: str = DB_PATH) -> None:
     # Load canonical split and filter to hemophilia classes
     print(f"Loading split from {RECORD_5CLASS} …")
-    train_df, test_df = load_split_from_record(RECORD_5CLASS, DB_PATH)
+    train_df, val_df = load_split_from_record(RECORD_5CLASS, db_path)
     train_df = filter_classes(train_df, HEMO_CLASSES)
-    test_df  = filter_classes(test_df,  HEMO_CLASSES)
+    val_df   = filter_classes(val_df,   HEMO_CLASSES)
 
-    print(f"Train: {len(train_df)} images  Test: {len(test_df)} images")
-    print("Train class counts:",
+    print(f"Train: {len(train_df)} images  Validation: {len(val_df)} images")
+    print("Train class counts:     ",
           {c: int((train_df["Exp_Type"] == c).sum()) for c in HEMO_CLASSES})
-    print("Test class counts: ",
-          {c: int((test_df["Exp_Type"]  == c).sum()) for c in HEMO_CLASSES})
+    print("Validation class counts:",
+          {c: int((val_df["Exp_Type"]  == c).sum()) for c in HEMO_CLASSES})
 
     # Save split record for this model directory
     record_path = os.path.join(model_dir, "train_record.json")
-    save_train_record(train_df, test_df, record_path,
-                      mode=args.mode, class_names=CLASS_NAMES_3,
+    save_train_record(train_df, val_df, record_path,
+                      mode=mode, class_names=CLASS_NAMES_3,
                       note="Hemophilia subset of the 5-class split")
 
     # Train
-    if args.mode == "scratch":
-        train_scratch(model_dir, train_df, test_df, device)
+    if mode == "scratch":
+        history = train_scratch(model_dir, train_df, val_df, device, preload=preload)
     else:
-        train_finetune(model_dir, train_df, test_df, device)
+        history = train_finetune(model_dir, train_df, val_df, device, preload=preload)
+
+    # Save training history
+    history_path = os.path.join(model_dir, "training_history.json")
+    with open(history_path, "w") as f:
+        json.dump(history, f, indent=2)
+    print(f"Training history saved to: {history_path}")
 
     # Final evaluation with best checkpoint
-    print("\nDetailed evaluation of best model on 3-class hemophilia test set:")
+    print("\nDetailed evaluation of best model on 3-class hemophilia validation set:")
     model_path = os.path.join(model_dir, "best_model.pth")
     final_model = FibrinCNN(num_classes=3).to(device)
     final_model.load_state_dict(
         torch.load(model_path, map_location=device, weights_only=True)
     )
     preprocessor = make_preprocessor(gray_method=GRAY_METHOD, pool_factor=POOL_FACTOR)
-    _, test_loader = _build_loaders(train_df, test_df, preprocessor)
-    results = evaluate_model(final_model, test_loader, device, CLASS_NAMES_3)
+    _, val_loader = _build_loaders(train_df, val_df, preprocessor)
+    results = evaluate_model(final_model, val_loader, device, CLASS_NAMES_3)
     print(results["report_str"])
 
 
