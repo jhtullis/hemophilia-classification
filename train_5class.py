@@ -147,22 +147,24 @@ def evaluate_loader(model: FibrinCNN, loader: DataLoader,
 # Main
 # ---------------------------------------------------------------------------
 
-def main(preload: bool = False, db_path: str = DB_PATH):
+def main(preload: bool = False, db_path: str = DB_PATH,
+         force_resplit: bool = False):
     os.makedirs(MODEL_DIR, exist_ok=True)
     log_path = os.path.join(MODEL_DIR, "training_log.txt")
     print(f"Training log → {log_path}")
 
     with _Tee(log_path):
-        _main(preload=preload, db_path=db_path)
+        _main(preload=preload, db_path=db_path, force_resplit=force_resplit)
 
 
-def _main(preload: bool = False, db_path: str = DB_PATH):
+def _main(preload: bool = False, db_path: str = DB_PATH,
+          force_resplit: bool = False):
     torch.set_num_threads(os.cpu_count() or 4)
     device = torch.device("cpu")
     torch.manual_seed(SEED)
 
     # --- Data ---
-    print("Loading data and performing train/validation split …")
+    print("Loading data …")
     train_loader, val_loader, meta = create_dataloaders(
         db_path=db_path,
         photo_dir=PHOTO_DIR,
@@ -173,6 +175,7 @@ def _main(preload: bool = False, db_path: str = DB_PATH):
         pool_factor=POOL_FACTOR,
         train_record_path=RECORD_PATH,
         preload=preload,
+        force_resplit=force_resplit,
     )
 
     print(f"\nClass names:  {meta['class_names']}")
@@ -254,5 +257,8 @@ if __name__ == "__main__":
                         help="Preload all images into RAM before training.")
     parser.add_argument("--db", default=DB_PATH, metavar="PATH",
                         help="Path to SQLite database (default: data/endpoint10.db).")
+    parser.add_argument("--force-resplit", action="store_true",
+                        help="Regenerate the train/val split even if train_record.json "
+                             "already exists (overwrites the saved split).")
     args = parser.parse_args()
-    main(preload=args.preload, db_path=args.db)
+    main(preload=args.preload, db_path=args.db, force_resplit=args.force_resplit)

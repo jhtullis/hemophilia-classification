@@ -40,17 +40,29 @@ def main():
         help="Preload all preprocessed images into RAM before training "
              "(eliminates disk I/O; ~700 MB for original pipeline).",
     )
+    p.add_argument(
+        "--db", default=None, metavar="PATH",
+        help="Path to SQLite database (default: data/endpoint10.db).",
+    )
+    p.add_argument(
+        "--force-resplit", action="store_true",
+        help="Regenerate the train/val split even if train_record.json already exists.",
+    )
     args = p.parse_args()
+
+    common = {"preload": args.preload}
+    if args.db:
+        common["db_path"] = args.db
 
     if args.model_type == "5class":
         from train_5class import main as _train
-        _train(preload=args.preload)
+        _train(**common, force_resplit=args.force_resplit)
     elif args.model_type == "3class_scratch":
         from train_3class import main as _train
-        _train(mode="scratch", preload=args.preload)
+        _train(mode="scratch", **common)
     elif args.model_type == "3class_finetune":
         from train_3class import main as _train
-        _train(mode="finetune", preload=args.preload)
+        _train(mode="finetune", **common)
     else:
         print(f"Unknown model-type: {args.model_type}", file=sys.stderr)
         sys.exit(1)

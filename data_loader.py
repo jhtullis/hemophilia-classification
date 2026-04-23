@@ -309,8 +309,14 @@ def create_dataloaders(
     num_workers: int = None,
     train_record_path: str = "train_record.json",
     preload: bool = False,
+    force_resplit: bool = False,
 ) -> Tuple[DataLoader, DataLoader, dict]:
     """End-to-end factory: DB → split → datasets → dataloaders.
+
+    If train_record_path already exists and force_resplit is False, the saved
+    split is reloaded rather than regenerated.  Pass force_resplit=True (or
+    --force-resplit on the CLI) to discard the existing split and create a new
+    one, which will overwrite the record file.
 
     Args:
         db_path:           Path to endpoint10.db.
@@ -322,8 +328,10 @@ def create_dataloaders(
         pool_factor:       Min-pool downsampling factor.
         num_workers:       DataLoader worker processes. Defaults to
                            min(8, max(4, cpu_count - 2)).
-        train_record_path: Where to write the JSON training record.
+        train_record_path: Where to write (or read) the JSON training record.
         preload:           If True, load all images into RAM at startup.
+        force_resplit:     If True, always regenerate the split even if a
+                           record file already exists.
 
     Returns:
         (train_loader, val_loader, metadata_dict)
@@ -332,13 +340,16 @@ def create_dataloaders(
     if num_workers is None:
         num_workers = min(8, max(4, (os.cpu_count() or 4) - 2))
 
-    engine = get_engine(db_path)
-    df = load_metadata(engine)
-    train_df, val_df = split_by_experiment(df, train_ratio=train_ratio, seed=seed)
-
-    save_train_record(train_df, val_df, train_record_path,
-                      seed=seed, train_ratio=train_ratio,
-                      gray_method=gray_method, pool_factor=pool_factor)
+    if not force_resplit and os.path.exists(train_record_path):
+        print(f"Reusing existing split from {train_record_path}")
+        train_df, val_df = load_split_from_record(train_record_path, db_path)
+    else:
+        engine = get_engine(db_path)
+        df = load_metadata(engine)
+        train_df, val_df = split_by_experiment(df, train_ratio=train_ratio, seed=seed)
+        save_train_record(train_df, val_df, train_record_path,
+                          seed=seed, train_ratio=train_ratio,
+                          gray_method=gray_method, pool_factor=pool_factor)
 
     preprocessor = make_preprocessor(gray_method=gray_method, pool_factor=pool_factor)
 
