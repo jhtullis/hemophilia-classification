@@ -172,7 +172,7 @@ def plot_conv3_conv4(model: FibrinCNN, output_dir: str) -> None:
 
 def plot_activation_maps(model: FibrinCNN, model_dir: str,
                          output_dir: str, device: torch.device,
-                         preprocessor) -> None:
+                         preprocessor, db_path: str = DB_PATH) -> None:
     """Show mean activation per block for one representative test image per class.
 
     Layout: rows = classes, cols = conv blocks.
@@ -183,7 +183,6 @@ def plot_activation_maps(model: FibrinCNN, model_dir: str,
     num_classes = model.classifier[-1].out_features
     if num_classes == 3:
         class_names = ["F08D", "F09D", "F11D"]
-        from data_loader import CLASS_MAP_3  # type: ignore[attr-defined]
         cmap = {"F08D": 0, "F09D": 1, "F11D": 2}
     else:
         class_names = CLASS_NAMES
@@ -193,7 +192,7 @@ def plot_activation_maps(model: FibrinCNN, model_dir: str,
     record_path = os.path.join(model_dir, "train_record.json")
     if not os.path.exists(record_path):
         record_path = "models/5class/train_record.json"
-    _, test_df = load_split_from_record(record_path, args.db)
+    _, test_df = load_split_from_record(record_path, db_path)
     if num_classes == 3:
         test_df = filter_classes(test_df, class_names)
 
@@ -307,7 +306,8 @@ def main() -> None:
     plot_conv3_conv4(model, args.model_dir)
 
     print("Figure 4: Activation maps …")
-    plot_activation_maps(model, args.model_dir, args.model_dir, device, preprocessor)
+    plot_activation_maps(model, args.model_dir, args.model_dir, device, preprocessor,
+                         db_path=args.db)
 
     print("\nDone.")
 

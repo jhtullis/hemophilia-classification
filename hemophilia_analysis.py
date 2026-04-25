@@ -223,6 +223,9 @@ def run_roc_analysis(
         ax.set_xlim([0.0, 1.0])
         ax.set_ylim([0.0, 1.02])
         fig.tight_layout()
+        out_dir = os.path.dirname(output_path)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
         fig.savefig(output_path, dpi=150)
         plt.close(fig)
         print(f"\n   ROC plot saved → {output_path}")
@@ -410,6 +413,9 @@ def run_compare(
     ax.set_xlim([0.0, 1.0])
     ax.set_ylim([0.0, 1.02])
     fig.tight_layout()
+    out_dir = os.path.dirname(output_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
     print(f"\n   Comparison ROC plot saved → {output_path}")

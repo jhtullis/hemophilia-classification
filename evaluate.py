@@ -13,7 +13,9 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from data_loader import CLASS_NAMES, FibrinDataset, load_split_from_record
+from analysis_utils import (MODEL_REGISTRY, PHOTOS_DIR, get_val_split,
+                             load_model_from_registry, run_inference_full)
+from data_loader import CLASS_NAMES
 from model import FibrinCNN
 from preprocessing import make_preprocessor
 
@@ -44,6 +46,7 @@ def predict_all(model: FibrinCNN, loader: DataLoader,
     Returns:
         (predictions, true_labels) — integer arrays of length N.
     """
+    model.eval()
     all_preds, all_labels = [], []
     with torch.no_grad():
         for images, labels in loader:
@@ -147,33 +150,42 @@ def evaluate_model(model: FibrinCNN, loader: DataLoader,
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate the 5-class FibrinCNN.")
+    parser = argparse.ArgumentParser(description="Evaluate a FibrinCNN model.")
+    parser.add_argument("--model-type", default="5class",
+                        choices=list(MODEL_REGISTRY),
+                        help="Which trained model to evaluate (default: 5class).")
     parser.add_argument("--db", default=DB_PATH, metavar="PATH",
                         help="Path to SQLite database (default: data/endpoint10.db).")
     args = parser.parse_args()
 
     device = torch.device("cpu")
 
-    if not os.path.exists(MODEL_PATH):
-        print(f"No model found at {MODEL_PATH}. Run train_5class.py first.")
+    try:
+        model, _, num_classes, class_map, class_names = \
+            load_model_from_registry(args.model_type, device)
+    except FileNotFoundError as e:
+        print(e)
         return
 
-    print("Loading model …")
-    model = load_model(MODEL_PATH, device=device)
+    print(f"Model: {args.model_type}  ({num_classes} classes: {class_names})")
     print(model.summary())
 
-    print("\nLoading validation data from saved split …")
-    _, val_df = load_split_from_record(RECORD_PATH, args.db)
+    print("\nLoading validation split …")
+    val_df = get_val_split(args.model_type, db_path=args.db)
     preprocessor = make_preprocessor(gray_method="lab_l", pool_factor=10)
-    val_ds = FibrinDataset(val_df, PHOTO_DIR, preprocessor, augment=False)
-    val_loader = DataLoader(val_ds, batch_size=16, shuffle=False,
-                            num_workers=4, pin_memory=False)
 
-    print("Running inference on validation set …")
-    results = evaluate_model(model, val_loader, device, CLASS_NAMES)
+    print(f"Running inference on {len(val_df)} validation images …")
+    results_df = run_inference_full(model, val_df, PHOTOS_DIR, device,
+                                    preprocessor, class_map, class_names)
 
-    print(f"\nValidation accuracy: {results['accuracy']:.4f}")
-    print(results["report_str"])
+    preds  = results_df["pred_label"].values
+    labels = results_df["true_label"].values
+    cm     = confusion_matrix(preds, labels, num_classes)
+    acc    = float(np.diag(cm).sum() / cm.sum())
+    report = classification_report(preds, labels, class_names)
+
+    print(f"\nValidation accuracy: {acc:.4f}")
+    print(report)
 
 
 if __name__ == "__main__":

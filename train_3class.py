@@ -394,6 +394,7 @@ def _main_inner(mode: str, device: torch.device, model_dir: str,
     final_model.load_state_dict(
         torch.load(model_path, map_location=device, weights_only=True)
     )
+    final_model.eval()
     preprocessor = make_preprocessor(gray_method=GRAY_METHOD, pool_factor=POOL_FACTOR)
     _, val_loader = _build_loaders(train_df, val_df, preprocessor)
     results = evaluate_model(final_model, val_loader, device, CLASS_NAMES_3)
