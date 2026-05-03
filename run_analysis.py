@@ -74,6 +74,7 @@ def main():
         ("Activation analysis",      "activation_analysis.py",      mt,                                                                         True),
         ("Preprocessing comparison", "preprocessing_comparison.py", mt,                                                                         True),
         ("Grad-CAM",                 "gradcam.py",                  mt,                                                                         True),
+        ("Grad-CAM overlays (all)",  "gradcam.py",                  mt + ["--all-overlays"],                                                    True),
         ("ROC / AUC curves",         "hemophilia_analysis.py",      mt + ["--roc", "--roc-output",
                                                                           os.path.join(roc_dir, "roc_curves.png")],                             True),
         ("Annotated test images",    "hemophilia_analysis.py",      mt + ["--annotate", "--annotate-dir",
@@ -81,7 +82,7 @@ def main():
         ("Kernel / activation maps", "visualize_weights.py",        ["--model-dir", model_dir],                                                 False),
     ]
 
-    n = len(scripts) + 2  # +1 training curves, +1 compare
+    n = len(scripts) + 2  # +1 for training curves, +1 for compare
     failed = []
 
     for i, (label, script, extra_args, pass_db) in enumerate(scripts, 1):

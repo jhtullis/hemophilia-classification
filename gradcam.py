@@ -31,9 +31,9 @@ import torch.nn.functional as F
 
 from data_loader import (CLASS_MAP, CLASS_NAMES, filter_classes,
                          load_split_from_record)
-from hemophilia_analysis import _MODEL_REGISTRY, load_model
+from hemophilia_analysis import _MODEL_REGISTRY, _draw_banner, load_model
 from model import FibrinCNN
-from preprocessing import make_preprocessor
+from preprocessing import ensure_landscape, make_preprocessor
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -60,6 +60,9 @@ def _parse_args():
                    help="Override output directory.")
     p.add_argument("--misclassified-only", action="store_true",
                    help="Only generate Grad-CAM for misclassified images.")
+    p.add_argument("--all-overlays", action="store_true",
+                   help="Generate Grad-CAM overlays on full-resolution images "
+                        "for every test image (saved to <out_dir>/all_overlays/).")
     p.add_argument("--db", default=DB_PATH, metavar="PATH",
                    help="Path to SQLite database (default: data/endpoint10.db).")
     return p.parse_args()
@@ -287,7 +290,7 @@ def plot_misclassified(gcam: GradCAM, results: List[dict],
         true_cls = inv_class_map[r["true_label"]]
         pred_cls = inv_class_map[r["pred_label"]]
 
-        fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5.5))
         axes[0].imshow(gray, cmap="gray", vmin=0, vmax=255)
         axes[0].set_title(f"Input\n(TRUE: {true_cls})", fontsize=10)
         axes[1].imshow(overlay_true)
@@ -302,11 +305,12 @@ def plot_misclassified(gcam: GradCAM, results: List[dict],
             for i in range(len(r["probs"]))
         )
         fig.suptitle(
-            f"MISCLASSIFIED  idx={r['idx']:04d}  TRUE={true_cls} → PRED={pred_cls}"
-            f"\nProbs: {prob_str}",
+            f"MISCLASSIFIED  idx={r['idx']:04d}  TRUE={true_cls} → PRED={pred_cls}",
             fontsize=10,
         )
-        plt.tight_layout()
+        fig.text(0.5, 0.04, f"Probs: {prob_str}",
+                 ha="center", fontsize=9, color="#444444")
+        plt.tight_layout(rect=[0, 0.08, 1, 0.93])
         fname = f"{r['idx']:04d}_true-{true_cls}_pred-{pred_cls}.png"
         out_path = os.path.join(out_dir, fname)
         fig.savefig(out_path, dpi=100, bbox_inches="tight")
@@ -424,6 +428,60 @@ def write_summary(gcam: GradCAM, results: List[dict],
 
 
 # ---------------------------------------------------------------------------
+# Output E: all_overlays/<idx>.JPG  — full-resolution GradCAM + banner
+# ---------------------------------------------------------------------------
+
+def plot_all_overlays(gcam: GradCAM, results: List[dict],
+                      inv_class_map: Dict[int, str],
+                      photos_dir: str, device: torch.device,
+                      preprocessor, out_dir: str) -> None:
+    """Write GradCAM overlay images for every test image at full resolution.
+
+    Each output JPEG shows the original image with the Grad-CAM heatmap blended
+    on top, plus the same annotation banner used by hemophilia_analysis --annotate
+    (TRUE / PRED class, per-class probabilities, colour-coded correct/wrong).
+    """
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    print(f"   Output folder: {os.path.abspath(out_dir)}/\n")
+
+    n = len(results)
+    for i, r in enumerate(results, 1):
+        idx      = r["idx"]
+        true_cls = inv_class_map[r["true_label"]]
+        pred_cls = inv_class_map[r["pred_label"]]
+
+        img_bgr = cv2.imread(os.path.join(photos_dir, f"{idx:04d}.JPG"))
+        if img_bgr is None:
+            print(f"   [{i:>4}/{n}] {idx:04d}.JPG  SKIPPED (not found)")
+            continue
+        img_bgr = ensure_landscape(img_bgr)
+
+        # Grad-CAM heatmap on preprocessed tensor (predicted class)
+        tensor = _load_tensor(idx, photos_dir, preprocessor, device)
+        gcam.model.zero_grad()
+        heatmap = gcam.compute(tensor, r["pred_label"])
+
+        # Upsample heatmap to original image resolution and blend
+        H, W = img_bgr.shape[:2]
+        h_up     = cv2.resize(heatmap, (W, H), interpolation=cv2.INTER_LINEAR)
+        colormap = cv2.applyColorMap((h_up * 255).astype(np.uint8), cv2.COLORMAP_JET)
+        blended  = cv2.addWeighted(img_bgr, 0.5, colormap, 0.5, 0)
+
+        # Add annotation banner (matches annotated_test style)
+        annotated = _draw_banner(blended, true_cls, pred_cls,
+                                 r["probs"], inv_class_map)
+
+        fname = f"{idx:04d}.JPG"
+        cv2.imwrite(os.path.join(out_dir, fname), annotated,
+                    [cv2.IMWRITE_JPEG_QUALITY, 90])
+
+        status = "OK" if r["correct"] else "MISMATCH"
+        print(f"   [{i:>4}/{n}] {fname}  true={true_cls}  pred={pred_cls}  {status}")
+
+    print(f"\n   Done — {n}/{n} images written.")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -475,6 +533,12 @@ def main() -> None:
     print("\nSpatial attention summary ...")
     write_summary(gcam, results, class_names, inv_class_map,
                   PHOTOS_DIR, device, preprocessor, args.model_type, out_dir)
+
+    if args.all_overlays:
+        overlays_dir = os.path.join(out_dir, "all_overlays")
+        print(f"\nFull-resolution Grad-CAM overlays ({len(results)} images) ...")
+        plot_all_overlays(gcam, results, inv_class_map,
+                          PHOTOS_DIR, device, preprocessor, overlays_dir)
 
     gcam.remove_hooks()
     print("\nDone.")
