@@ -138,7 +138,7 @@ def run_inference_full(
     Args:
         model:        FibrinCNN in eval mode.
         val_df:       DataFrame from load_split_from_record (or filter_classes subset).
-        photos_dir:   Path to directory containing 0000.JPG ... 0858.JPG.
+        photos_dir:   Path to directory containing 0000.JPG ... 0999.JPG.
         device:       torch.device.
         preprocessor: Callable img_bgr → tensor (from make_preprocessor).
         class_map:    Dict mapping class name string → int label.

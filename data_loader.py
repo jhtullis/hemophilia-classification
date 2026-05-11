@@ -156,7 +156,7 @@ class FibrinDataset(Dataset):
 
     Args:
         df:          Metadata DataFrame (subset of load_metadata() output).
-        photo_dir:   Directory containing 0000.JPG … 0858.JPG.
+        photo_dir:   Directory containing 0000.JPG … 0999.JPG.
         preprocessor: Callable img_bgr → torch.Tensor (from make_preprocessor).
         augment:     If True, expose 4× the images with flip augmentations.
         preload:     If True, preprocess all images into RAM at init time.

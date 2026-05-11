@@ -257,7 +257,7 @@ def train_finetune(model_dir: str, train_df, val_df,
     if not os.path.exists(MODEL_5CLASS):
         raise FileNotFoundError(
             f"5-class model not found at {MODEL_5CLASS}. "
-            "Run train_5class.py first."
+            "Run: python train.py --model-type 5class"
         )
 
     preprocessor = make_preprocessor(gray_method=GRAY_METHOD, pool_factor=POOL_FACTOR)
