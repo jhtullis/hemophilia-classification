@@ -2,5 +2,13 @@
 *.db
 __pycache__
 old
-# frangi not ready yet
-test_output/frangi/
+test_output/
+.pytest_cache/
+models/*/analysis/gradcam/misclassified/
+models/*/analysis/gradcam/all_overlays/
+models/*/analysis/gradcam/gradcam_summary.txt
+models/*/analysis/misclassification/per_image_results.csv
+models/*/analysis/misclassification/misclassification_summary.txt
+models/*/analysis/preprocessing/preprocessing_comparison_report.txt
+models/*/analysis/preprocessing/preprocessing_comparison_table.csv
+models/*/analysis/activation/spatial_activation_stats.csv

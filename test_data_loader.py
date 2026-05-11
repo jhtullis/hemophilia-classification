@@ -43,7 +43,7 @@ def split(df):
 # ---------------------------------------------------------------------------
 
 def test_load_metadata_row_count(df):
-    assert len(df) == 859, f"Expected 859 rows, got {len(df)}"
+    assert len(df) == 1000, f"Expected 1000 rows, got {len(df)}"
 
 
 def test_load_metadata_columns(df):
@@ -52,7 +52,7 @@ def test_load_metadata_columns(df):
 
 
 def test_load_metadata_class_distribution(df):
-    expected = {"AC3": 219, "F08D": 120, "F09D": 180, "F11D": 180, "NC1": 160}
+    expected = {"AC3": 200, "F08D": 200, "F09D": 200, "F11D": 200, "NC1": 200}
     counts = df["Exp_Type"].value_counts().to_dict()
     for cls, n in expected.items():
         assert counts.get(cls) == n, f"Class {cls}: expected {n}, got {counts.get(cls)}"
@@ -60,8 +60,8 @@ def test_load_metadata_class_distribution(df):
 
 def test_load_metadata_idx_range(df):
     assert df["idx"].min() == 0, "idx should start at 0"
-    assert df["idx"].max() == 858, "idx should end at 858"
-    assert df["idx"].nunique() == 859, "All idx values should be unique"
+    assert df["idx"].max() == 999, "idx should end at 999"
+    assert df["idx"].nunique() == 1000, "All idx values should be unique"
 
 
 def test_class_mapping():

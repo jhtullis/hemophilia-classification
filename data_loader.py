@@ -74,9 +74,9 @@ def split_by_experiment(
     All images from the same experiment stay in the same partition
     to prevent data leakage between train and validation sets.
 
-    For classes with very few experiments (e.g. F08D has 6), a floor of
-    1 validation experiment is guaranteed; this may push the effective train
-    ratio above the requested value for small classes.
+    A minimum of 1 validation experiment per class is guaranteed regardless
+    of the train_ratio; this may slightly push the effective train ratio above
+    the target for classes with very few experiments.
 
     Args:
         df:          Metadata DataFrame from load_metadata().

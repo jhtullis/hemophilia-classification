@@ -28,7 +28,7 @@ from preprocessing import make_preprocessor
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 DB_PATH    = os.path.join(os.path.dirname(__file__), "data", "endpoint10.db")
-PHOTOS_DIR = "data/photos"
+PHOTOS_DIR = os.path.join(os.path.dirname(__file__), "data", "photos")
 GRAY_METHOD = "lab_l"
 POOL_FACTOR = 10
 

@@ -39,7 +39,7 @@ from preprocessing import ensure_landscape, make_preprocessor
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 DB_PATH    = os.path.join(os.path.dirname(__file__), "data", "endpoint10.db")
-PHOTOS_DIR = "data/photos"
+PHOTOS_DIR = os.path.join(os.path.dirname(__file__), "data", "photos")
 
 HEMOPHILIA_CLASSES: List[str] = ["F08D", "F09D", "F11D"]
 

@@ -43,10 +43,11 @@ HEMOPHILIA_CLASSES: List[str] = ["F08D", "F09D", "F11D"]
 # Model registry — mirrors hemophilia_analysis._MODEL_REGISTRY
 # ---------------------------------------------------------------------------
 
+_DIR = os.path.dirname(__file__)
 MODEL_REGISTRY: Dict[str, Tuple[str, int, dict]] = {
-    "5class":          ("models/5class",               5, CLASS_MAP),
-    "3class_scratch":  ("models/3class_hemo",           3, CLASS_MAP_3),
-    "3class_finetune": ("models/3class_hemo_finetune",  3, CLASS_MAP_3),
+    "5class":          (os.path.join(_DIR, "models", "5class"),               5, CLASS_MAP),
+    "3class_scratch":  (os.path.join(_DIR, "models", "3class_hemo"),           3, CLASS_MAP_3),
+    "3class_finetune": (os.path.join(_DIR, "models", "3class_hemo_finetune"),  3, CLASS_MAP_3),
 }
 
 # ---------------------------------------------------------------------------

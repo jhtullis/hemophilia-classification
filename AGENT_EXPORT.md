@@ -24,11 +24,11 @@ differences from microscopy images alone.
 ### Class Labels and Biological Meaning
 | Label | Condition | Count | Notes |
 |-------|-----------|-------|-------|
-| AC3   | Activated Complement 3 — normal plasma with complement activation | 219 | Non-hemophilic control |
-| F08D  | Factor VIII (8) deficient — Hemophilia A | 120 | Fewest images; ~6 experiments |
-| F09D  | Factor IX (9) deficient — Hemophilia B | 180 | |
-| F11D  | Factor XI (11) deficient — Hemophilia C | 180 | |
-| NC1   | Normal Control 1 — standard normal plasma | 160 | Non-hemophilic control |
+| AC3   | Prolonged clotting time | 200 | Non-hemophilic control |
+| F08D  | Factor VIII (8) deficient — Hemophilia A | 200 | |
+| F09D  | Factor IX (9) deficient — Hemophilia B | 200 | |
+| F11D  | Factor XI (11) deficient — Hemophilia C | 200 | |
+| NC1   | Normal Control 1 — standard normal plasma | 200 | Non-hemophilic control |
 
 The three hemophilia classes (F08D, F09D, F11D) are the primary scientific interest:
 can the model distinguish between different hemophilia types? AC3 and NC1 are
@@ -43,7 +43,7 @@ normal/control phenotypes that the 5-class model must also accommodate.
 
 ### Images
 - Location: `data/photos/`
-- Format: JPEG, named `0000.JPG` through `0858.JPG` (859 images total)
+- Format: JPEG, named `0000.JPG` through `0999.JPG` (1000 images total)
 - Resolution: **6000 × 4000 pixels** (landscape orientation)
 - Content: microscopy images of fibrin clots — mostly light background with dark
   fibrous patches stretching across the frame. The fiber pattern, density, and
@@ -52,7 +52,7 @@ normal/control phenotypes that the 5-class model must also accommodate.
   (e.g., `0000.JPG` = row 1, `0042.JPG` = row 43)
 
 ### Database
-- Location: `data/test_db.db` (SQLite)
+- Location: `data/endpoint10.db` (SQLite)
 - Table: `Images_Endpoint_10`
 - Key columns:
   - `rowid`: 1-based row index
@@ -65,20 +65,20 @@ normal/control phenotypes that the 5-class model must also accommodate.
   added `idx` column (`rowid - 1`) used to construct filenames.
 
 ### Experiments
-There are **41 distinct experiments**. Multiple images come from the same
-experiment (different slides or fields of view). Images within the same experiment
-are correlated — they represent the same plasma sample. This is critical:
+There are **50 distinct experiments** — 10 per class. Multiple images come from the
+same experiment (different slides or fields of view). Images within the same
+experiment are correlated — they represent the same plasma sample. This is critical:
 
-> **The train/test split is performed at the experiment level**, not the image
+> **The train/validation split is performed at the experiment level**, not the image
 > level. All images from one experiment always land in the same partition. This
 > prevents data leakage where correlated images from the same plasma sample appear
-> in both train and test sets.
+> in both train and validation sets.
 
-Approximate experiment counts per class: AC3 ~10, F08D ~6, F09D ~9, F11D ~9, NC1 ~7.
+Exactly 8 experiments per class are used for training and 2 for validation (80/20).
 
 ---
 
-## Canonical Train/Test Split
+## Canonical Train/Validation Split
 
 The split is generated once and saved to `models/5class/train_record.json`. All
 downstream scripts reconstruct the same split from this file rather than
@@ -89,34 +89,31 @@ re-randomizing. This ensures fair, consistent evaluation across all model varian
 {
   "split_date": "2025-...",
   "seed": 42,
-  "train_ratio": 0.75,
+  "train_ratio": 0.8,
   "train_experiments": { "AC3": [...], "F08D": [...], ... },
-  "test_experiments": { "AC3": [...], "F08D": [...], ... },
+  "val_experiments":   { "AC3": [...], "F08D": [...], ... },
   "train_indices": [0, 1, 3, ...],
-  "test_indices": [2, 8, ...],
+  "val_indices":   [2, 8, ...],
   "class_distribution": {
-    "train": { "AC3": 164, "F08D": 100, ... },
-    "test":  { "AC3": 55,  "F08D": 20, ... }
+    "train": { "AC3": 160, "F08D": 160, ... },
+    "val":   { "AC3": 40,  "F08D": 40, ... }
   }
 }
 ```
 
-The `train_indices` and `test_indices` are the `idx` values (0-based integer image
+The `train_indices` and `val_indices` are the `idx` values (0-based integer image
 indices), stored as sorted lists. `load_split_from_record(record_path, db_path)`
-reconstructs exact `(train_df, test_df)` DataFrames from these lists.
+reconstructs exact `(train_df, val_df)` DataFrames from these lists.
 
-### Approximate split sizes (75/25 target)
-| Class | Train | Test |
-|-------|-------|------|
-| AC3   | ~164  | ~55  |
-| F08D  | ~100  | ~20  |
-| F09D  | ~135  | ~45  |
-| F11D  | ~135  | ~45  |
-| NC1   | ~120  | ~40  |
-| **Total** | **~654** | **~205** |
-
-F08D uses 5/6 experiments for training (~83%) because it has so few experiments;
-the logic guarantees at least 1 test experiment per class.
+### Split sizes (80/20, exact)
+| Class | Train | Val |
+|-------|-------|-----|
+| AC3   | 160   | 40  |
+| F08D  | 160   | 40  |
+| F09D  | 160   | 40  |
+| F11D  | 160   | 40  |
+| NC1   | 160   | 40  |
+| **Total** | **800** | **200** |
 
 ---
 
@@ -212,22 +209,28 @@ Three complementary strategies are used simultaneously:
 ```
 models/
   5class/
-    best_model.pth          Weights with highest test accuracy over 30 epochs
-    train_record.json       Canonical train/test split (shared by all models)
+    best_model.pth          Weights with highest val accuracy over 30 epochs
+    train_record.json       Canonical train/val split (shared by all models)
     training_log.txt        Full stdout log from training run
+    training_history.json   Per-epoch loss and accuracy
+    training_curves.png     Train/val loss and accuracy curves
     conv1_kernels.png       Visualization: 32 Conv1 filters
     conv2_kernels.png       Visualization: 64 Conv2 filters (mean over input ch)
     conv3_conv4_kernels.png Visualization: Conv3+Conv4 filters side by side
     activation_maps.png     Visualization: mean activation per block per class
-    hemophilia_roc.png      OVR ROC curves for F08D/F09D/F11D
-    annotated_test/         Test images with prediction banners overlaid
+    analysis/               Analysis outputs (generated by run_analysis.py)
+      roc/                  ROC / AUC curves
+      gradcam/              Grad-CAM saliency maps + class representatives
+      misclassification/    Confusion matrix, per-image error analysis
+      activation/           Spatial activation statistics
+      preprocessing/        Grayscale method comparison
 
-  3class_hemo/              Trained by: python train_3class.py --mode scratch
+  3class_hemo/              Trained by: python train.py --model-type 3class_scratch
     best_model.pth
-    train_record.json       (copy of 5class split, filtered to 3 classes)
+    train_record.json
     training_log.txt
 
-  3class_hemo_finetune/     Trained by: python train_3class.py --mode finetune
+  3class_hemo_finetune/     Trained by: python train.py --model-type 3class_finetune
     best_model.pth          (fine-tuned from 5-class weights)
     train_record.json
     training_log.txt
@@ -236,6 +239,9 @@ models/
 ---
 
 ## Scripts Overview
+
+### `train.py` — Unified training entry point
+Dispatches to `train_5class.py` or `train_3class.py` based on `--model-type`.
 
 ### `train_5class.py` — 5-class training
 Trains `FibrinCNN(num_classes=5)` from scratch. Saves best checkpoint and
@@ -256,22 +262,30 @@ Both modes reuse the canonical 5-class split, filtered to the 3 hemophilia class
 `CLASS_MAP_3 = {"F08D":0, "F09D":1, "F11D":2}` instead of the 5-class CLASS_MAP
 (where F11D=3, which would be out-of-range for a 3-class model).
 
+### `run_analysis.py` — Full analysis suite
+Runs all 11 analysis steps in order for a given model type. Outputs go to
+`models/<type>/analysis/`. Usage: `python run_analysis.py --model-type 5class`.
+
 ### `evaluate.py` — Detailed metrics
-Loads the 5-class model and test set from saved split. Prints per-class
+Loads a model and val set from saved split. Prints per-class
 precision/recall/F1, confusion matrix.
 
 ### `hemophilia_analysis.py` — ROC curves + annotated images + model comparison
 - `--model-type {5class,3class_scratch,3class_finetune}`: select which model
 - `--roc`: OVR ROC curves for F08D/F09D/F11D (and optionally other classes)
-- `--annotate`: write annotated test images (true class, pred class, softmax probs)
+- `--annotate`: write annotated val images (true class, pred class, softmax probs)
 - `--compare`: overlay ROC curves from all three model types + accuracy table
 - `--classes`: expand analysis to other classes (default: F08D F09D F11D)
+
+### `gradcam.py` — Grad-CAM saliency maps
+- Default: class representative + misclassified Grad-CAM plots
+- `--all-overlays`: full-resolution Grad-CAM overlay on all val images
 
 ### `visualize_weights.py` — CNN kernel + activation visualization
 - Conv1: 32 filters (1×5×5), shown as 4×8 heatmap grid (RdBu_r colormap)
 - Conv2: 64 filters, mean over 32 input channels → 8×8 heatmap grid
 - Conv3+Conv4: side-by-side 8×16 and 16×16 grids of 3×3 filters
-- Activation maps: forward hooks on MaxPool outputs; one test image per class;
+- Activation maps: forward hooks on MaxPool outputs; one val image per class;
   channel-mean activation shown as viridis heatmap
 
 ---
@@ -284,13 +298,13 @@ from data_loader import load_split_from_record, filter_classes, FibrinDataset, m
 from preprocessing import make_preprocessor
 from torch.utils.data import DataLoader
 
-train_df, test_df = load_split_from_record("models/5class/train_record.json", "data/test_db.db")
+train_df, val_df = load_split_from_record("models/5class/train_record.json", "data/endpoint10.db")
 # Optionally filter to hemophilia classes:
-test_df = filter_classes(test_df, ["F08D", "F09D", "F11D"])
+val_df = filter_classes(val_df, ["F08D", "F09D", "F11D"])
 
 preprocessor = make_preprocessor(gray_method="lab_l", pool_factor=10)
-test_ds = FibrinDataset(test_df, "data/photos", preprocessor, augment=False)
-test_loader = DataLoader(test_ds, batch_size=16, shuffle=False, num_workers=4)
+val_ds = FibrinDataset(val_df, "data/photos", preprocessor, augment=False)
+val_loader = DataLoader(val_ds, batch_size=16, shuffle=False, num_workers=4)
 ```
 
 ### Loading a model
@@ -317,9 +331,10 @@ num_classes = sd["classifier.3.bias"].shape[0]  # 5 or 3
 |-------|-------|-----|
 | 5-class labels (F11D=3) out-of-range in 3-class model | `FibrinDataset.__getitem__` | Use `FibrinDataset3` subclass with `CLASS_MAP_3` |
 | BN running stats shift during frozen fine-tune Phase 1 | `train_3class.py` finetune | Call `model.features.eval()` each batch in Phase 1 |
+| BatchNorm uses batch stats instead of running stats | Any fresh `FibrinCNN()` instance | Always call `model.eval()` before inference; `evaluate.py:predict_all()` does this defensively |
 | `ReduceLROnPlateau(verbose=True)` error | PyTorch 2.4+ dropped this arg | Removed `verbose` argument |
 | `np.trapz` AttributeError | NumPy 2.0 renamed it | Use `np.trapezoid` instead |
-| Test set consistency across models | All eval scripts | Always use `load_split_from_record`, never `create_dataloaders` for eval |
+| Val set consistency across models | All eval scripts | Always use `load_split_from_record`, never `create_dataloaders` for eval |
 | ROC column index mismatch for 3-class | `hemophilia_analysis.py` | Parameterize `class_map` in `collect_predictions` and `run_roc_analysis` |
 
 ---
@@ -341,14 +356,15 @@ The following are directions that have been discussed or are natural extensions,
 but have not yet been implemented:
 
 1. **Run and compare all three models** — `train_3class.py` has been written but
-   the 3-class models have not yet been trained. Running `--mode scratch` and
-   `--mode finetune` and then `hemophilia_analysis.py --compare` would give the
-   first empirical answer to "does specializing the model to 3 hemophilia classes
-   improve discrimination?"
+   the 3-class models have not yet been trained on the new 1000-image dataset.
+   Running `--mode scratch` and `--mode finetune` and then
+   `hemophilia_analysis.py --compare` would give the first empirical answer to
+   "does specializing the model to 3 hemophilia classes improve discrimination?"
 
-2. **Image-level exploration** — Examining which test images are misclassified,
+2. **Image-level exploration** — Examining which val images are misclassified,
    whether misclassifications cluster by experiment, slide type, or spatial region.
-   The annotated test images in `models/5class/annotated_test/` are a starting point.
+   The annotated val images in `models/5class/analysis/annotated_test/` are a
+   starting point.
 
 3. **Activation map analysis** — The `activation_maps.png` from `visualize_weights.py`
    shows where the network responds. Investigating whether it attends to fiber
