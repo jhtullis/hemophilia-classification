@@ -32,6 +32,7 @@ conda activate fibrin
   - Filename integer = `rowid - 1` (row 1 → `0000.JPG`)
   - Key columns: `Experiment`, `Exp_Type` (class), `Slide_Type` (A/B)
 - **50 distinct experiments** (10 per class); all images from one experiment stay in the same partition
+- Source: Cordner, R., & Tullis, J. H. (2026). Brightfield Images of Factor Deficient Plasma Clots [Data set]. Zenodo. [https://doi.org/10.5281/zenodo.19994554](https://doi.org/10.5281/zenodo.19994554)
 
 ---
 
@@ -209,6 +210,6 @@ test_output/                 Visual outputs from preprocessing and augmentation 
 
 ---
 
-## Authorship Note
+## AI Use Note
 
-This repository was developed with extensive use of [Claude Code](https://claude.ai/code) (Anthropic), with active review, participation, and scientific guidance by the human author throughout.
+This repository was developed with extensive use of [Claude Code](https://claude.ai/code) (Anthropic). Claude Code wrote the code files and the majority of the documentation files contained in this repository. The author, Jason Henry Tullis, provided an initial specification file outlining the desired build, along with active review, correction, and modifications to the AI outputs during the development process.
