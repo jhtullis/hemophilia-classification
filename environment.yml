@@ -14,4 +14,3 @@ dependencies:
   - torchaudio
   - pytorch
   - pytest
-prefix: /home/jhtullis/miniconda3/envs/fibrin
