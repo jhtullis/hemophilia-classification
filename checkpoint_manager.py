@@ -67,7 +67,7 @@ def init_wandb(
             project=project,
             config=config,
             name=run_name or model_type,
-            resume="must" if (resume_run and run_id) else "allow",
+            resume="allow",
         )
         if entity:
             init_kwargs["entity"] = entity
