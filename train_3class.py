@@ -177,7 +177,8 @@ def _evaluate_loader(model: FibrinCNN, loader: DataLoader,
 
 def _build_loaders(train_df, val_df, preprocessor, preload: bool = False,
                    pin_memory: bool = False):
-    num_workers = min(8, max(4, (os.cpu_count() or 4) - 2))
+    avail_cpus = int(os.environ.get("SLURM_CPUS_PER_TASK", None) or os.cpu_count() or 4)
+    num_workers = min(8, max(2, avail_cpus - 1))
     train_ds = FibrinDataset3(train_df, PHOTO_DIR, preprocessor,
                               augment=True, preload=preload)
     val_ds   = FibrinDataset3(val_df,   PHOTO_DIR, preprocessor,

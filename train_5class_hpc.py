@@ -356,7 +356,8 @@ def _main(
         from data_loader import (FibrinDataset, make_balanced_sampler,
                                  load_split_from_record)
         from preprocessing import make_preprocessor
-        num_workers = min(8, max(4, (os.cpu_count() or 4) - 2))
+        avail_cpus = int(os.environ.get("SLURM_CPUS_PER_TASK", None) or os.cpu_count() or 4)
+        num_workers = min(8, max(2, avail_cpus - 1))
         train_df, val_df = load_split_from_record(RECORD_PATH, db_path)
         preprocessor = make_preprocessor(gray_method=GRAY_METHOD,
                                          pool_factor=POOL_FACTOR)
