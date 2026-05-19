@@ -13,3 +13,4 @@ models/*/analysis/misclassification/misclassification_summary.txt
 models/*/analysis/preprocessing/preprocessing_comparison_report.txt
 models/*/analysis/preprocessing/preprocessing_comparison_table.csv
 models/*/analysis/activation/spatial_activation_stats.csv
+slurm/logs/
