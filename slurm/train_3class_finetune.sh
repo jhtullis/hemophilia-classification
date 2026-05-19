@@ -16,6 +16,8 @@
 module load miniforge3
 conda activate fibrin
 
+export WANDB_MODE=offline
+
 python train.py --model-type 3class_finetune \
     --max-epochs 10000 --epochs-per-job 200 --resume
 

@@ -4,14 +4,14 @@
 module load miniforge3
 mamba env create -f environment.yml
 
-# After env creation, authenticate Weights & Biases (one-time per user):
+# After env creation, authenticate Weights & Biases (one-time per user).
+# Add your API key to ~/.bashrc so all jobs pick it up automatically:
 #
-#   conda activate fibrin && wandb login
+#   echo 'export WANDB_API_KEY=<your-key-from-wandb.ai/authorize>' >> ~/.bashrc
+#   source ~/.bashrc
 #
-# Alternatively, set your API key in ~/.bashrc or in each job script:
-#   export WANDB_API_KEY=<your-key-from-wandb.ai/authorize>
+# BYU HPC compute nodes have no outbound internet, so slurm jobs run wandb
+# in offline mode (WANDB_MODE=offline is set in each job script). After a job
+# completes, sync from the login node (which has internet):
 #
-# To run jobs without internet access (sync later):
-#   export WANDB_MODE=offline
-#   # After the job completes, sync the run:
-#   wandb sync models/<type>/wandb/run-*/
+#   bash slurm/sync_wandb.sh
