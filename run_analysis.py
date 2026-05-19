@@ -28,9 +28,11 @@ import sys
 
 
 _MODEL_DIRS = {
-    "5class":          os.path.join("models", "5class"),
-    "3class_scratch":  os.path.join("models", "3class_hemo"),
-    "3class_finetune": os.path.join("models", "3class_hemo_finetune"),
+    "5class":               os.path.join("models", "5class"),
+    "5class_hpc_baseline":  os.path.join("models", "5class_hpc_baseline"),
+    "5class_hpc_v0":        os.path.join("models", "5class_hpc_v0"),
+    "3class_scratch":       os.path.join("models", "3class_hemo"),
+    "3class_finetune":      os.path.join("models", "3class_hemo_finetune"),
 }
 
 
@@ -49,7 +51,8 @@ def main():
     )
     p.add_argument("--model-type", default="5class",
                    choices=list(_MODEL_DIRS.keys()),
-                   help="Which trained model to analyse (default: 5class).")
+                   help="Which trained model to analyse (default: 5class). "
+                        "Use 5class_hpc_v0 for the cosine-head model.")
     p.add_argument("--db", default=None, metavar="PATH",
                    help="Path to SQLite database (default: data/endpoint10.db).")
     args = p.parse_args()
@@ -66,10 +69,13 @@ def main():
 
     mt = ["--model-type", model_type]
 
+    # Only the cosine-head model uses evaluate_cosine.py; all others use evaluate.py
+    eval_script = "evaluate_cosine.py" if model_type == "5class_hpc_v0" else "evaluate.py"
+
     # Build ordered step list: (label, script, extra_args, pass_db)
     roc_dir = os.path.join(model_dir, "analysis", "roc")
     scripts = [
-        ("Evaluation metrics",       "evaluate.py",                mt,                                                                         True),
+        ("Evaluation metrics",       eval_script,                  mt,                                                                         True),
         ("Misclassification report", "misclassification_report.py", mt,                                                                         True),
         ("Activation analysis",      "activation_analysis.py",      mt,                                                                         True),
         ("Preprocessing comparison", "preprocessing_comparison.py", mt,                                                                         True),

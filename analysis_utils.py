@@ -45,9 +45,11 @@ HEMOPHILIA_CLASSES: List[str] = ["F08D", "F09D", "F11D"]
 
 _DIR = os.path.dirname(__file__)
 MODEL_REGISTRY: Dict[str, Tuple[str, int, dict]] = {
-    "5class":          (os.path.join(_DIR, "models", "5class"),               5, CLASS_MAP),
-    "3class_scratch":  (os.path.join(_DIR, "models", "3class_hemo"),           3, CLASS_MAP_3),
-    "3class_finetune": (os.path.join(_DIR, "models", "3class_hemo_finetune"),  3, CLASS_MAP_3),
+    "5class":               (os.path.join(_DIR, "models", "5class"),               5, CLASS_MAP),
+    "5class_hpc_baseline":  (os.path.join(_DIR, "models", "5class_hpc_baseline"),  5, CLASS_MAP),
+    "5class_hpc_v0":        (os.path.join(_DIR, "models", "5class_hpc_v0"),        5, CLASS_MAP),
+    "3class_scratch":       (os.path.join(_DIR, "models", "3class_hemo"),           3, CLASS_MAP_3),
+    "3class_finetune":      (os.path.join(_DIR, "models", "3class_hemo_finetune"),  3, CLASS_MAP_3),
 }
 
 # ---------------------------------------------------------------------------
@@ -74,7 +76,8 @@ def load_model_from_registry(
     """Load a trained model by registry key.
 
     Args:
-        model_type: One of "5class", "3class_scratch", "3class_finetune".
+        model_type: One of "5class", "5class_hpc_baseline", "5class_hpc_v0",
+                    "3class_scratch", "3class_finetune".
         device:     torch.device to load model onto.
 
     Returns:
@@ -88,7 +91,15 @@ def load_model_from_registry(
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"No trained model at {model_path}. "
                                 "Train the model first.")
-    model = _load_model(model_path, device=device, num_classes=num_classes)
+    # Cosine-head models require FibrinCNNCosine; all others (including 5class_hpc_baseline) use FibrinCNN
+    if model_type == "5class_hpc_v0":
+        from model import FibrinCNNCosine
+        model = FibrinCNNCosine(num_classes=num_classes)
+        sd = torch.load(model_path, map_location=device, weights_only=True)
+        model.load_state_dict(sd)
+        model.to(device).eval()
+    else:
+        model = _load_model(model_path, device=device, num_classes=num_classes)
     class_names = [k for k, v in sorted(class_map.items(), key=lambda x: x[1])]
     return model, model_dir, num_classes, class_map, class_names
 
@@ -102,11 +113,12 @@ def get_val_split(model_type: str, db_path: str = DB_PATH) -> pd.DataFrame:
 
     Always uses models/5class/train_record.json as the canonical split.
     For 3-class models, filters to the hemophilia classes.
+    5-class and hpc models get the full 200-image val set.
 
     Returns:
         val_df with columns: idx, Experiment, Exp_Type, Slide_Type, ...
     """
-    record_path = os.path.join("models", "5class", "train_record.json")
+    record_path = os.path.join(_DIR, "models", "5class", "train_record.json")
     _, val_df = load_split_from_record(record_path, db_path)
 
     _, num_classes, _ = MODEL_REGISTRY[model_type]

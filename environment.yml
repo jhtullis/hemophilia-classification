@@ -1,16 +1,19 @@
 name: fibrin
 channels:
   - conda-forge
-  - defaults
 dependencies:
+  - python=3.11
   - numpy
-  - opencv
   - pandas
   - ipykernel
   - sqlalchemy
   - scikit-image
   - matplotlib
+  - pytest
+  - py-opencv
+  - scikit-learn
+  - scipy
+  - umap-learn
+  - pytorch=2.7.1=cuda126_mkl*
   - torchvision
   - torchaudio
-  - pytorch
-  - pytest

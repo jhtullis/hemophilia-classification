@@ -36,6 +36,7 @@ spatial dimensions within each block (no aspect ratio changes).
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from typing import List
 
 
@@ -117,3 +118,39 @@ class FibrinCNN(nn.Module):
         lines.append("-" * 40)
         lines.append(f"  {'Total':40s}  {total:>10,d}")
         return "\n".join(lines)
+
+
+class NormalizedLinear(nn.Module):
+    """Linear layer where both input features and weight rows are L2-normalized
+    before the dot product. Output is cosine similarities in [−1, 1]."""
+
+    def __init__(self, in_features: int, out_features: int):
+        super().__init__()
+        self.weight = nn.Parameter(torch.randn(out_features, in_features))
+        nn.init.xavier_uniform_(self.weight)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x_norm = F.normalize(x, p=2, dim=1)
+        w_norm = F.normalize(self.weight, p=2, dim=1)
+        return x_norm @ w_norm.T   # cosine similarities in [-1, 1]
+
+
+class FibrinCNNCosine(FibrinCNN):
+    """FibrinCNN with a normalized cosine classifier head.
+
+    Forward pass returns raw cosine similarities in [−1, 1]; no softmax.
+    Training uses cosine loss (train_5class_hpc.py).
+    Evaluation uses evaluate_cosine.py.
+    Argmax of similarities gives predicted class — identical to logit argmax.
+    """
+
+    def __init__(self, num_classes: int = 5):
+        super().__init__(num_classes=num_classes)
+        # Replace the final Linear with NormalizedLinear; keep all other layers
+        in_features = self.classifier[-1].in_features
+        self.classifier[-1] = NormalizedLinear(in_features, num_classes)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Inherited forward; classifier[-1] is now NormalizedLinear,
+        # so output is cosine similarities, not logits.
+        return super().forward(x)

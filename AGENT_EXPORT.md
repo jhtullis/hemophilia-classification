@@ -383,3 +383,87 @@ but have not yet been implemented:
 6. **Grad-CAM or similar** — Class activation maps beyond simple channel-mean
    activations would give more interpretable saliency maps indicating which image
    regions drive each class decision.
+
+---
+
+## HPC Training and Checkpointing
+
+### One-time environment setup (BYU HPC login node)
+```bash
+bash slurm/setup_env.sh   # runs: module load miniforge3 && mamba env create -f environment.yml
+```
+
+### Submitting training jobs
+```bash
+# Submit all 4 jobs simultaneously (they are independent):
+bash slurm/submit_all.sh
+
+# Or individually:
+sbatch slurm/train_5class.sh
+sbatch slurm/train_5class_hpc_v0.sh
+sbatch slurm/train_3class_scratch.sh
+sbatch slurm/train_3class_finetune.sh
+
+squeue -u $USER   # monitor job status
+```
+
+### Self-resubmitting job chain (exit code convention)
+Each Slurm script checks the Python exit code and resubmits itself if needed:
+- **Exit code 0** — `--epochs-per-job` quota exhausted; more epochs remain → Slurm script calls `sbatch` on itself
+- **Exit code 100** — `--max-epochs` reached; training complete → no resubmission
+
+### Checkpoint locations
+```
+models/{type}/checkpoints/
+    latest.pth           always overwritten (used for --resume)
+    epoch_00020.pth      periodic snapshots
+    epoch_00040.pth
+    ...
+    epoch_10000.pth
+```
+
+Cadence: every 20 epochs up to epoch 300; every 100 epochs from epoch 301 onward.
+Each `.pth` is ~2–5 MB (FibrinCNN ~455K params); ~30 periodic files total ≈ 150 MB.
+
+### Resuming a job manually
+```bash
+python train.py --model-type 5class_hpc_v0 --max-epochs 10000 --epochs-per-job 200 --resume
+```
+The checkpoint restores model weights, optimizer state, scheduler state, `best_acc`,
+and `history`. The scheduler state is critical — omitting it would reset the cosine
+phase or ReduceLROnPlateau patience counter at every job boundary.
+
+### Extended CSV log
+Each epoch appends one row to `models/{type}/training_log_full.csv`.
+Standard columns (all models): `epoch, train_loss, train_acc, val_loss, val_acc, lr,
+elapsed_seconds, wall_clock_time, best_val_acc_so_far, model_type, phase`
+
+Cosine-native columns (5class_hpc_v0 only):
+`val_ovr_auc_mean, val_ovr_auc_AC3, ..., val_silhouette, val_intra_sim_mean, val_inter_sim_mean`
+
+Watch a live run:
+```bash
+tail -f models/5class_hpc_v0/training_log_full.csv
+python -c "import pandas as pd; df=pd.read_csv('models/5class_hpc_v0/training_log_full.csv'); print(df[['epoch','val_acc','val_ovr_auc_mean','val_silhouette']].tail(20))"
+```
+
+### Global epoch for cosine scheduler
+`CosineAnnealingWarmRestarts.step(epoch)` receives the **global** (cumulative) epoch,
+not the within-job counter. This keeps the cosine schedule continuous across job
+boundaries. Restart epochs: 100, 300, 700, 1500, 3100, 6300, 12700… (T_0=100, T_mult=2).
+
+### Grokking / BatchNorm note
+The experiment is motivated by delayed generalization ("grokking", Power et al. 2022).
+However, Humayun et al. (ICML 2024, Fig. 10) shows BatchNorm removes the abrupt local-
+complexity phase transition that drives delayed robustness. FibrinCNN has BatchNorm, so
+an abrupt grokking jump is unlikely. The correct framing is **testing for continued
+generalization under extended training**, not grokking per se.
+
+### Cosine model (`5class_hpc_v0`) notes
+- Architecture: `FibrinCNNCosine` — identical to `FibrinCNN` except `classifier[-1]`
+  is `NormalizedLinear(128→5)`, which outputs cosine similarities in [−1, 1].
+- Loss: `cosine_loss` — `L = mean(w_y × (1 − s_y))`. No softmax. No Softmax Collapse.
+- Optimizer: `AdamW(lr=1e-3, weight_decay=1e-3)`. Stronger weight decay than baseline.
+- Evaluation: `python evaluate_cosine.py --model-type 5class_hpc_v0`
+  Outputs: `models/5class_hpc_v0/analysis/cosine_eval/`
+- `tau_cal` (Platt scaling, `--calibrate` flag): post-hoc only, not a model parameter.
