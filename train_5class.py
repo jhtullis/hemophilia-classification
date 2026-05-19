@@ -29,7 +29,8 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-from checkpoint_manager import (load_latest_checkpoint, log_epoch,
+from checkpoint_manager import (finish_wandb, get_wandb_run_id, init_wandb,
+                                 load_latest_checkpoint, log_epoch,
                                  save_checkpoint, should_save_periodic)
 from data_loader import CLASS_NAMES, create_dataloaders
 from evaluate import evaluate_model
@@ -164,6 +165,9 @@ def main(
     max_epochs: int = 10000,
     epochs_per_job: int = 200,
     model_dir: str = None,
+    wandb_enabled: bool = True,
+    wandb_project: str = "fibrin-cnn",
+    wandb_run_name: str = None,
 ) -> None:
     effective_dir = model_dir if model_dir is not None else MODEL_DIR
     os.makedirs(effective_dir, exist_ok=True)
@@ -175,6 +179,9 @@ def main(
             device=device, resume=resume,
             max_epochs=max_epochs, epochs_per_job=epochs_per_job,
             model_dir=effective_dir,
+            wandb_enabled=wandb_enabled,
+            wandb_project=wandb_project,
+            wandb_run_name=wandb_run_name,
         )
     sys.exit(_exit_code)
 
@@ -188,6 +195,9 @@ def _main(
     max_epochs: int = 10000,
     epochs_per_job: int = 200,
     model_dir: str = None,
+    wandb_enabled: bool = True,
+    wandb_project: str = "fibrin-cnn",
+    wandb_run_name: str = None,
 ) -> int:
     effective_dir = model_dir if model_dir is not None else MODEL_DIR
     model_type_str = os.path.basename(effective_dir)
@@ -288,7 +298,20 @@ def _main(
             start_epoch = ckpt["epoch"] + 1
             history     = ckpt["history"]
     else:
+        ckpt = None
         load_latest_checkpoint(effective_dir)  # prints "Starting from scratch"
+
+    wandb_run_id = ckpt.get("wandb_run_id") if ckpt else None
+    init_wandb(
+        config={**_CONFIG, "model_type": model_type_str},
+        model_type=model_type_str,
+        project=wandb_project,
+        entity=None,
+        run_name=wandb_run_name,
+        run_id=wandb_run_id,
+        resume_run=(resume and wandb_run_id is not None),
+        enabled=wandb_enabled,
+    )
 
     # Load and extend training_history.json on resume
     if resume and os.path.exists(history_path):
@@ -345,6 +368,7 @@ def _main(
             "model_type":           model_type_str,
             "phase":                1,
             "config":               _CONFIG,
+            "wandb_run_id":         get_wandb_run_id(),
         }
         save_checkpoint(ckpt_state, effective_dir, epoch, is_best, max_epochs)
 
@@ -377,9 +401,11 @@ def _main(
                                          weights_only=True))
         results = evaluate_model(model, val_loader, device, meta["class_names"])
         print(results["report_str"])
+        finish_wandb()
         return 100
     else:
         print(f"Job quota reached (epoch {end_epoch}). Resubmit to continue.")
+        finish_wandb()
         return 0
 
 

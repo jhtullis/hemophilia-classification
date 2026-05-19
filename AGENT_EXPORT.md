@@ -467,3 +467,64 @@ generalization under extended training**, not grokking per se.
 - Evaluation: `python evaluate_cosine.py --model-type 5class_hpc_v0`
   Outputs: `models/5class_hpc_v0/analysis/cosine_eval/`
 - `tau_cal` (Platt scaling, `--calibrate` flag): post-hoc only, not a model parameter.
+
+---
+
+## Weights & Biases Tracking
+
+W&B logging is **on by default** for all training scripts. Pass `--no-wandb` to disable.
+
+### One-time setup (HPC login node)
+```bash
+conda activate fibrin && wandb login
+# Or set in ~/.bashrc / job script:
+export WANDB_API_KEY=<key from wandb.ai/authorize>
+```
+
+For offline clusters (no internet during jobs):
+```bash
+export WANDB_MODE=offline
+# After job: wandb sync models/<type>/wandb/run-*/
+```
+
+### Run naming
+Each run is automatically named after the model type (e.g. `5class_hpc_v0`). Override:
+```bash
+python train.py --model-type 5class_hpc_v0 --wandb-run-name my-run-label
+```
+
+To use a different project:
+```bash
+python train.py --model-type 5class_hpc_v0 --wandb-project my-project
+```
+
+### Metrics logged per epoch
+All numeric columns from `training_log_full.csv` are forwarded to W&B with `step=epoch`:
+
+| Metric | All models | Cosine (hpc_v0) only |
+|--------|------------|----------------------|
+| `train_loss`, `train_acc` | ✓ | ✓ |
+| `val_loss`, `val_acc` | ✓ | ✓ |
+| `lr` | ✓ | ✓ |
+| `elapsed_seconds` | ✓ | ✓ |
+| `wall_clock_unix` (Unix ts) | ✓ | ✓ |
+| `best_val_acc_so_far` | ✓ | ✓ |
+| `phase` (1 or 2, finetune) | ✓ | — |
+| `val_ovr_auc_*`, `val_ovr_auc_mean` | — | ✓ |
+| `val_silhouette` | — | ✓ |
+| `val_intra_sim_mean`, `val_inter_sim_mean` | — | ✓ |
+
+`wall_clock_time` (ISO string) is converted to `wall_clock_unix` (float) for plottability.
+`model_type` is logged to the run's Config panel, not as a metric.
+
+### Resume across Slurm job boundaries
+The wandb run ID is stored in every checkpoint (`ckpt["wandb_run_id"]`). When a job
+resumes (`--resume`), `init_wandb()` reloads that ID and calls `wandb.init(resume="must")`,
+continuing the same W&B run. No manual action required.
+
+### Disabling W&B
+```bash
+python train.py --model-type 5class_hpc_baseline --no-wandb
+```
+If W&B is not installed or authentication fails, training continues normally with a
+one-line warning — W&B failure never blocks training.

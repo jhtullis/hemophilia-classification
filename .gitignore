@@ -1,5 +1,6 @@
 *.JPG
 *.db
+wandb/
 __pycache__
 old
 test_output/

@@ -79,16 +79,31 @@ def main():
         "--epochs-per-job", type=int, default=200,
         help="Epochs to run in this Slurm job before exiting with code 0 (default: 200).",
     )
+    p.add_argument(
+        "--no-wandb", action="store_true",
+        help="Disable Weights & Biases logging.",
+    )
+    p.add_argument(
+        "--wandb-project", default="fibrin-cnn",
+        help="W&B project name (default: fibrin-cnn).",
+    )
+    p.add_argument(
+        "--wandb-run-name", default=None,
+        help="W&B run display name (default: model-type).",
+    )
     args = p.parse_args()
 
     device = get_device()
 
     common = {
-        "preload":        args.preload,
-        "device":         device,
-        "resume":         args.resume,
-        "max_epochs":     args.max_epochs,
-        "epochs_per_job": args.epochs_per_job,
+        "preload":          args.preload,
+        "device":           device,
+        "resume":           args.resume,
+        "max_epochs":       args.max_epochs,
+        "epochs_per_job":   args.epochs_per_job,
+        "wandb_enabled":    not args.no_wandb,
+        "wandb_project":    args.wandb_project,
+        "wandb_run_name":   args.wandb_run_name,
     }
     if args.db:
         common["db_path"] = args.db

@@ -44,7 +44,8 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
-from checkpoint_manager import (load_latest_checkpoint, log_epoch,
+from checkpoint_manager import (finish_wandb, get_wandb_run_id, init_wandb,
+                                 load_latest_checkpoint, log_epoch,
                                  save_checkpoint)
 from data_loader import (CLASS_MAP, CLASS_NAMES, FibrinDataset,
                          filter_classes, load_split_from_record,
@@ -283,6 +284,7 @@ def _run_loop(
             "model_type":           model_type_str,
             "phase":                current_phase,
             "config":               _config,
+            "wandb_run_id":         get_wandb_run_id(),
         }
         save_checkpoint(ckpt_state, model_dir, epoch, is_best, max_epochs)
 
@@ -308,7 +310,15 @@ def _run_loop(
 def train_scratch(model_dir: str, train_df, val_df,
                   device: torch.device, preload: bool = False,
                   resume: bool = False, max_epochs: int = 10000,
-                  epochs_per_job: int = 200) -> Tuple[Dict, int]:
+                  epochs_per_job: int = 200,
+                  wandb_enabled: bool = True, wandb_project: str = "fibrin-cnn",
+                  wandb_run_name: str = None) -> Tuple[Dict, int]:
+    _config = {
+        "lr_head": LR_HEAD, "weight_decay": WEIGHT_DECAY, "batch_size": BATCH_SIZE,
+        "gray_method": GRAY_METHOD, "pool_factor": POOL_FACTOR,
+        "optimizer": "Adam", "scheduler": "ReduceLROnPlateau",
+        "loss": "CrossEntropyLoss", "model_type": "3class_scratch",
+    }
     pin_memory = device.type == "cuda"
     preprocessor = make_preprocessor(gray_method=GRAY_METHOD, pool_factor=POOL_FACTOR)
     train_loader, val_loader = _build_loaders(train_df, val_df, preprocessor,
@@ -337,7 +347,13 @@ def train_scratch(model_dir: str, train_df, val_df,
             start_epoch = ckpt["epoch"] + 1
             history     = ckpt["history"]
     else:
+        ckpt = None
         load_latest_checkpoint(model_dir)
+
+    wandb_run_id = ckpt.get("wandb_run_id") if ckpt else None
+    init_wandb(config=_config, model_type="3class_scratch", project=wandb_project,
+               entity=None, run_name=wandb_run_name, run_id=wandb_run_id,
+               resume_run=(resume and wandb_run_id is not None), enabled=wandb_enabled)
 
     history_path = os.path.join(model_dir, "training_history.json")
     if resume and os.path.exists(history_path):
@@ -366,7 +382,9 @@ def train_scratch(model_dir: str, train_df, val_df,
 def train_finetune(model_dir: str, train_df, val_df,
                    device: torch.device, preload: bool = False,
                    resume: bool = False, max_epochs: int = 10000,
-                   epochs_per_job: int = 200) -> Tuple[Dict, int]:
+                   epochs_per_job: int = 200,
+                   wandb_enabled: bool = True, wandb_project: str = "fibrin-cnn",
+                   wandb_run_name: str = None) -> Tuple[Dict, int]:
     if not resume and not os.path.exists(MODEL_5CLASS):
         raise FileNotFoundError(
             f"5-class model not found at {MODEL_5CLASS}. "
@@ -426,12 +444,25 @@ def train_finetune(model_dir: str, train_df, val_df,
             start_epoch = ckpt["epoch"] + 1
             history     = ckpt["history"]
     else:
+        ckpt = None
         # Load pretrained 5-class weights
         model.load_state_dict(
             torch.load(MODEL_5CLASS, map_location=device, weights_only=True),
             strict=False,   # classifier[-1] shape differs; that's expected
         )
         load_latest_checkpoint(model_dir)  # prints "Starting from scratch"
+
+    _ft_config = {
+        "lr_head": LR_HEAD, "lr_full": LR_FULL, "weight_decay": WEIGHT_DECAY,
+        "batch_size": BATCH_SIZE, "gray_method": GRAY_METHOD,
+        "pool_factor": POOL_FACTOR, "optimizer": "Adam",
+        "scheduler": "ReduceLROnPlateau", "loss": "CrossEntropyLoss",
+        "model_type": "3class_finetune",
+    }
+    wandb_run_id = ckpt.get("wandb_run_id") if ckpt else None
+    init_wandb(config=_ft_config, model_type="3class_finetune", project=wandb_project,
+               entity=None, run_name=wandb_run_name, run_id=wandb_run_id,
+               resume_run=(resume and wandb_run_id is not None), enabled=wandb_enabled)
 
     history_path = os.path.join(model_dir, "training_history.json")
     if resume and os.path.exists(history_path):
@@ -460,7 +491,9 @@ def train_finetune(model_dir: str, train_df, val_df,
 
 def main(mode: str = None, preload: bool = False, db_path: str = DB_PATH,
          device: torch.device = None, resume: bool = False,
-         max_epochs: int = 10000, epochs_per_job: int = 200) -> None:
+         max_epochs: int = 10000, epochs_per_job: int = 200,
+         wandb_enabled: bool = True, wandb_project: str = "fibrin-cnn",
+         wandb_run_name: str = None) -> None:
     if mode is None:
         parser = argparse.ArgumentParser(
             description="Train a 3-class hemophilia CNN.",
@@ -501,14 +534,19 @@ def main(mode: str = None, preload: bool = False, db_path: str = DB_PATH,
         _exit_code = _main_inner(mode, device, model_dir, preload=preload,
                                   db_path=db_path, resume=resume,
                                   max_epochs=max_epochs,
-                                  epochs_per_job=epochs_per_job)
+                                  epochs_per_job=epochs_per_job,
+                                  wandb_enabled=wandb_enabled,
+                                  wandb_project=wandb_project,
+                                  wandb_run_name=wandb_run_name)
     sys.exit(_exit_code)
 
 
 def _main_inner(mode: str, device: torch.device, model_dir: str,
                 preload: bool = False, db_path: str = DB_PATH,
                 resume: bool = False, max_epochs: int = 10000,
-                epochs_per_job: int = 200) -> int:
+                epochs_per_job: int = 200,
+                wandb_enabled: bool = True, wandb_project: str = "fibrin-cnn",
+                wandb_run_name: str = None) -> int:
     print(f"Loading split from {RECORD_5CLASS} …")
     train_df, val_df = load_split_from_record(RECORD_5CLASS, db_path)
     train_df = filter_classes(train_df, HEMO_CLASSES)
@@ -529,11 +567,14 @@ def _main_inner(mode: str, device: torch.device, model_dir: str,
         model_dir=model_dir, train_df=train_df, val_df=val_df,
         device=device, preload=preload, resume=resume,
         max_epochs=max_epochs, epochs_per_job=epochs_per_job,
+        wandb_enabled=wandb_enabled, wandb_project=wandb_project,
+        wandb_run_name=wandb_run_name,
     )
     if mode == "scratch":
         history, exit_code = train_scratch(**train_kwargs)
     else:
         history, exit_code = train_finetune(**train_kwargs)
+    finish_wandb()
 
     history_path = os.path.join(model_dir, "training_history.json")
     with open(history_path, "w") as f:
