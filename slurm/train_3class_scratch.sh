@@ -13,6 +13,7 @@ module load miniforge3
 conda activate fibrin
 
 export WANDB_MODE=offline
+export WANDB_DIR=models/3class_hemo
 
 python train.py --model-type 3class_scratch \
     --max-epochs 10000 --epochs-per-job 200 --resume
