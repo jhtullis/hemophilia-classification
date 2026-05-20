@@ -25,7 +25,7 @@ export WANDB_MODE=offline
 export WANDB_DIR="${SCRIPT_DIR}/../models/3class_hemo_finetune"
 
 python train.py --model-type 3class_finetune \
-    --max-epochs 10000 --epochs-per-job 100 --resume &
+    --max-epochs 10000 --epochs-per-job 100 --resume --preload &
 PY_PID=$!
 wait $PY_PID
 
