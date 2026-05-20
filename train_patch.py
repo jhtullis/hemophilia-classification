@@ -1,0 +1,462 @@
+"""
+train_patch.py — Training loop for the patch_v0 patch-based cosine CNN.
+
+Called from train.py:
+    python train.py --model-type patch_v0 [options]
+
+Key design choices:
+    - CosineLoss (no cross-entropy, no softmax, no temperature)
+    - AdamW + CosineAnnealingWarmRestarts(T_0=100, T_mult=2)
+    - scheduler.step(global_epoch) for continuity across Slurm job boundaries
+    - checkpoint_manager.py for checkpointing + wandb integration
+    - wandb_run_id stored in checkpoint → same wandb run across all jobs
+    - compute_cosine_metrics() for both train and val every epoch
+
+Exit codes (consumed by slurm/train_patch_v0.sh):
+    0   — epochs_per_job exhausted; more epochs remain (Slurm: resubmit)
+    100 — max_epochs reached; training complete (Slurm: do not resubmit)
+"""
+
+import os
+import sys
+from datetime import datetime, timezone
+from typing import Optional
+
+import numpy as np
+import torch
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
+
+import kornia.augmentation as K
+
+from augmentation_patch import PatchAugmentation
+from checkpoint_manager import (
+    finish_wandb,
+    get_wandb_run_id,
+    init_wandb,
+    load_latest_checkpoint,
+    log_epoch,
+    save_checkpoint,
+    should_save_periodic,
+)
+from data_loader import CLASS_MAP, CLASS_NAMES
+from model_patch import FibrinPatchCNN, make_patch_model
+from patch_dataset import (
+    PATCH_SIZE,
+    OVERSIZED,
+    PATCHES_PER_IMAGE,
+    FibrinPatchDataset,
+    get_or_create_split,
+    make_patch_sampler,
+)
+from preprocessing import make_preprocessor
+
+
+# ---------------------------------------------------------------------------
+# Loss function
+# ---------------------------------------------------------------------------
+
+def cosine_loss(
+    similarities: torch.Tensor,
+    labels: torch.Tensor,
+    class_weights: torch.Tensor,
+) -> torch.Tensor:
+    """Cosine loss: L = mean(w_y * (1 - s_y)), range [0, 2].
+
+    s_y is the cosine similarity to the true class prototype.
+    w_y is the inverse-frequency class weight for that class.
+    No softmax; no temperature; gradient flows only from correct-class similarity.
+    """
+    correct_sims = similarities[torch.arange(len(labels)), labels]
+    weights = class_weights[labels]
+    return (weights * (1.0 - correct_sims)).mean()
+
+
+# ---------------------------------------------------------------------------
+# Cosine-specific metrics
+# ---------------------------------------------------------------------------
+
+def compute_cosine_metrics(
+    model: FibrinPatchCNN,
+    loader,
+    device: torch.device,
+    max_samples: int = 500,
+) -> dict:
+    """Collect embeddings and compute cosine-geometry metrics.
+
+    Collects up to max_samples L2-normalized 128-dim embeddings, then computes:
+        mean_max_sim   : mean cosine similarity between each sample and its
+                         class prototype (mean of same-class embeddings, normalized)
+        intra_class_cos: mean pairwise cosine similarity within same class
+        inter_class_cos: mean pairwise cosine similarity across classes
+        silhouette     : mean silhouette score using cosine distance (1 - cos_sim)
+                         a(i) = mean dist to same-class, b(i) = min mean dist to other class
+
+    Loader must yield (patches, labels) where patches are already 200×200.
+    Model is temporarily set to eval mode; restored to its original mode after.
+    No sklearn — pure PyTorch/numpy.
+    """
+    was_training = model.training
+    model.eval()
+
+    all_emb: list[torch.Tensor] = []
+    all_lbl: list[torch.Tensor] = []
+
+    with torch.no_grad():
+        for patches, labels in loader:
+            patches = patches.to(device)
+            emb = model.get_embeddings(patches)   # (B, 128), L2-normalized
+            all_emb.append(emb.cpu())
+            all_lbl.append(labels.cpu())
+            if sum(e.shape[0] for e in all_emb) >= max_samples:
+                break
+
+    emb = torch.cat(all_emb)[:max_samples]   # (N, 128)
+    lbl = torch.cat(all_lbl)[:max_samples]   # (N,)
+
+    if was_training:
+        model.train()
+
+    N = len(emb)
+    if N < 2:
+        return {"mean_max_sim": 0.0, "intra_class_cos": 0.0,
+                "inter_class_cos": 0.0, "silhouette": 0.0}
+
+    # Cosine similarity matrix — embeddings are L2-normalized so sim = dot product
+    sim_matrix = emb @ emb.T   # (N, N), values in [-1, 1]
+    sim_matrix = sim_matrix.clamp(-1.0, 1.0)   # guard floating-point overshoot
+
+    unique_classes = lbl.unique().tolist()
+
+    # Class prototypes: mean of embeddings per class, then L2-normalize
+    class_prototypes: dict[int, torch.Tensor] = {}
+    for c in unique_classes:
+        mask = (lbl == c)
+        proto = emb[mask].mean(0)
+        class_prototypes[c] = F.normalize(proto.unsqueeze(0), dim=1).squeeze(0)
+
+    # mean_max_sim: mean cosine similarity of each sample to its class prototype
+    mean_max_sim_vals = [
+        (emb[i] * class_prototypes[lbl[i].item()]).sum().item()
+        for i in range(N)
+    ]
+    mean_max_sim = float(np.mean(mean_max_sim_vals))
+
+    # Pairwise intra/inter-class cosine similarity
+    intra_sims: list[float] = []
+    inter_sims: list[float] = []
+    for i in range(N):
+        for j in range(i + 1, N):
+            s = sim_matrix[i, j].item()
+            if lbl[i] == lbl[j]:
+                intra_sims.append(s)
+            else:
+                inter_sims.append(s)
+
+    intra_class_cos = float(np.mean(intra_sims)) if intra_sims else 0.0
+    inter_class_cos = float(np.mean(inter_sims)) if inter_sims else 0.0
+
+    # Silhouette score using cosine distance = 1 - cosine_similarity
+    dist_matrix = (1.0 - sim_matrix).clamp(min=0.0)   # in [0, 2]; clamp guards fp rounding
+    silhouette_vals: list[float] = []
+    for i in range(N):
+        c_i = lbl[i].item()
+        same_mask = (lbl == c_i)
+        same_mask[i] = False
+
+        if same_mask.sum() == 0:
+            continue   # singleton — skip
+
+        a_i = dist_matrix[i, same_mask].mean().item()
+
+        b_i = float("inf")
+        for c2 in unique_classes:
+            if c2 == c_i:
+                continue
+            c2_mask = lbl == c2
+            if c2_mask.sum() == 0:
+                continue
+            b_c2 = dist_matrix[i, c2_mask].mean().item()
+            if b_c2 < b_i:
+                b_i = b_c2
+
+        if b_i == float("inf"):
+            continue
+
+        denom = max(a_i, b_i)
+        s_i = (b_i - a_i) / denom if denom > 1e-10 else 0.0
+        silhouette_vals.append(s_i)
+
+    silhouette = float(np.mean(silhouette_vals)) if silhouette_vals else 0.0
+
+    return {
+        "mean_max_sim": mean_max_sim,
+        "intra_class_cos": intra_class_cos,
+        "inter_class_cos": inter_class_cos,
+        "silhouette": silhouette,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Training loop helpers
+# ---------------------------------------------------------------------------
+
+def _compute_class_weights(train_df, device: torch.device) -> torch.Tensor:
+    class_counts = train_df["Exp_Type"].value_counts().to_dict()
+    total = len(train_df)
+    weights = torch.tensor(
+        [total / class_counts[cls] for cls in CLASS_NAMES],
+        dtype=torch.float32,
+        device=device,
+    )
+    return weights / weights.sum() * len(CLASS_NAMES)   # normalise
+
+
+def _accuracy(sims: torch.Tensor, labels: torch.Tensor) -> float:
+    return (sims.argmax(dim=1) == labels).float().mean().item()
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
+def main(
+    preload: bool = False,
+    device: torch.device = None,
+    resume: bool = False,
+    max_epochs: int = 10000,
+    epochs_per_job: int = 100,
+    wandb_enabled: bool = True,
+    wandb_project: str = "fibrin-cnn",
+    wandb_run_name: Optional[str] = None,
+    model_dir: str = "models/patch_v0",
+    db_path: Optional[str] = None,
+    photo_dir: str = "data/photos",
+    batch_size: int = 64,
+    lr: float = 1e-3,
+    weight_decay: float = 1e-3,
+    patches_per_image: int = PATCHES_PER_IMAGE,
+    num_classes: int = 5,
+) -> None:
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if db_path is None:
+        db_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "data", "endpoint10.db"
+        )
+
+    os.makedirs(model_dir, exist_ok=True)
+
+    # DataLoader worker count respects SLURM allocation
+    avail_cpus = int(os.environ.get("SLURM_CPUS_PER_TASK", None) or os.cpu_count() or 4)
+    num_workers = min(8, max(2, avail_cpus - 1))
+
+    # ── Data ────────────────────────────────────────────────────────────────
+    train_df, val_df, _ = get_or_create_split(model_dir, db_path)
+    preprocessor = make_preprocessor()
+
+    train_ds = FibrinPatchDataset(
+        train_df, photo_dir, preprocessor,
+        patches_per_image=patches_per_image, preload=preload,
+    )
+    val_ds = FibrinPatchDataset(
+        val_df, photo_dir, preprocessor,
+        patches_per_image=patches_per_image, preload=preload,
+    )
+
+    train_sampler = make_patch_sampler(train_ds)
+    train_loader = DataLoader(
+        train_ds, batch_size=batch_size, sampler=train_sampler,
+        num_workers=num_workers, pin_memory=True, persistent_workers=(num_workers > 0),
+    )
+    val_loader = DataLoader(
+        val_ds, batch_size=batch_size, shuffle=False,
+        num_workers=num_workers, pin_memory=True, persistent_workers=(num_workers > 0),
+    )
+
+    # ── Model ────────────────────────────────────────────────────────────────
+    model = make_patch_model(num_classes=num_classes).to(device)
+    augmentation = PatchAugmentation(patch_size=PATCH_SIZE).to(device)
+    center_crop = K.CenterCrop(PATCH_SIZE)
+    class_weights = _compute_class_weights(train_df, device)
+
+    # ── Optimizer + scheduler ────────────────────────────────────────────────
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        optimizer, T_0=100, T_mult=2, eta_min=1e-6
+    )
+
+    # ── Checkpoint resume ────────────────────────────────────────────────────
+    ckpt = load_latest_checkpoint(model_dir) if resume else None
+    if ckpt is not None:
+        model.load_state_dict(ckpt["model_state_dict"])
+        optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+        start_epoch = ckpt["epoch"] + 1
+        best_val_acc = ckpt.get("best_acc", 0.0)
+        history = ckpt.get("history", [])
+        wandb_run_id = ckpt.get("wandb_run_id")
+    else:
+        start_epoch = 0
+        best_val_acc = 0.0
+        history = []
+        wandb_run_id = None
+
+    # ── Wandb ────────────────────────────────────────────────────────────────
+    config = {
+        "model_type": "patch_v0",
+        "lr": lr,
+        "weight_decay": weight_decay,
+        "batch_size": batch_size,
+        "optimizer": "AdamW",
+        "scheduler": "CosineAnnealingWarmRestarts",
+        "scheduler_T0": 100,
+        "scheduler_Tmult": 2,
+        "scheduler_eta_min": 1e-6,
+        "loss": "CosineLoss",
+        "patch_size": PATCH_SIZE,
+        "oversized": OVERSIZED,
+        "patches_per_image": patches_per_image,
+        "num_classes": num_classes,
+        "max_epochs": max_epochs,
+        "epochs_per_job": epochs_per_job,
+    }
+    init_wandb(
+        config=config,
+        model_type="patch_v0",
+        project=wandb_project,
+        run_name=wandb_run_name or "patch_v0",
+        run_id=wandb_run_id,
+        resume_run=(wandb_run_id is not None),
+        enabled=wandb_enabled,
+    )
+
+    # ── Training loop ────────────────────────────────────────────────────────
+    job_epochs_done = 0
+
+    for epoch in range(start_epoch, max_epochs):
+
+        # Training pass
+        model.train()
+        augmentation.train()
+        train_loss_sum, train_correct, train_total = 0.0, 0, 0
+
+        for patches, labels in train_loader:
+            patches = patches.to(device, non_blocking=True)
+            labels = labels.to(device, non_blocking=True)
+
+            patches = augmentation(patches)   # 283→200 with rotation + flips
+
+            optimizer.zero_grad()
+            sims = model(patches)
+            loss = cosine_loss(sims, labels, class_weights)
+            loss.backward()
+            optimizer.step()
+
+            train_loss_sum += loss.item() * len(labels)
+            train_correct += (sims.argmax(1) == labels).sum().item()
+            train_total += len(labels)
+
+        # scheduler.step uses global epoch for continuity across Slurm jobs
+        scheduler.step(epoch)
+
+        train_loss = train_loss_sum / max(train_total, 1)
+        train_acc = train_correct / max(train_total, 1)
+
+        # Validation pass (center-crop only, no rotation)
+        model.eval()
+        val_loss_sum, val_correct, val_total = 0.0, 0, 0
+
+        with torch.no_grad():
+            for patches, labels in val_loader:
+                patches = patches.to(device, non_blocking=True)
+                labels = labels.to(device, non_blocking=True)
+                patches = center_crop(patches)   # 283→200, deterministic
+                sims = model(patches)
+                loss = cosine_loss(sims, labels, class_weights)
+                val_loss_sum += loss.item() * len(labels)
+                val_correct += (sims.argmax(1) == labels).sum().item()
+                val_total += len(labels)
+
+        val_loss = val_loss_sum / max(val_total, 1)
+        val_acc = val_correct / max(val_total, 1)
+
+        # Cosine metrics: training loader with augmentation, val loader plain
+        # Wrap loaders so compute_cosine_metrics receives 200×200 patches
+        class _AugLoader:
+            def __init__(self, raw): self._raw = raw
+            def __iter__(self):
+                for p, l in self._raw:
+                    yield augmentation(p.to(device)).cpu(), l
+        class _CropLoader:
+            def __init__(self, raw): self._raw = raw
+            def __iter__(self):
+                for p, l in self._raw:
+                    yield center_crop(p), l
+
+        train_cos = compute_cosine_metrics(
+            model, _AugLoader(train_loader), device, max_samples=500
+        )
+        val_cos = compute_cosine_metrics(
+            model, _CropLoader(val_loader), device, max_samples=500
+        )
+
+        # Logging
+        is_best = val_acc > best_val_acc
+        if is_best:
+            best_val_acc = val_acc
+
+        row = {
+            "epoch": epoch,
+            "train_loss": round(train_loss, 6),
+            "train_acc": round(train_acc, 6),
+            "val_loss": round(val_loss, 6),
+            "val_acc": round(val_acc, 6),
+            "train_mean_max_sim": round(train_cos["mean_max_sim"], 6),
+            "train_intra_cos": round(train_cos["intra_class_cos"], 6),
+            "train_inter_cos": round(train_cos["inter_class_cos"], 6),
+            "train_silhouette": round(train_cos["silhouette"], 6),
+            "val_mean_max_sim": round(val_cos["mean_max_sim"], 6),
+            "val_intra_cos": round(val_cos["intra_class_cos"], 6),
+            "val_inter_cos": round(val_cos["inter_class_cos"], 6),
+            "val_silhouette": round(val_cos["silhouette"], 6),
+            "lr": optimizer.param_groups[0]["lr"],
+            "model_type": "patch_v0",
+            "wall_clock_time": datetime.now(timezone.utc).isoformat(),
+        }
+        log_epoch(model_dir, row)
+        history.append({k: v for k, v in row.items() if k != "wall_clock_time"})
+
+        print(
+            f"Epoch {epoch:5d} | "
+            f"train loss={train_loss:.4f} acc={train_acc:.3f} | "
+            f"val loss={val_loss:.4f} acc={val_acc:.3f} | "
+            f"sil(tr={train_cos['silhouette']:.3f} va={val_cos['silhouette']:.3f}) | "
+            f"lr={optimizer.param_groups[0]['lr']:.2e}"
+            + (" ← best" if is_best else "")
+        )
+
+        # Checkpointing
+        state = {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "best_acc": best_val_acc,
+            "history": history,
+            "model_type": "patch_v0",
+            "phase": "training",
+            "config": config,
+            "wandb_run_id": get_wandb_run_id(),
+        }
+        save_checkpoint(state, model_dir, epoch, is_best, max_epochs)
+
+        job_epochs_done += 1
+        if job_epochs_done >= epochs_per_job:
+            print(f"epochs_per_job={epochs_per_job} exhausted at epoch {epoch}. Exiting.")
+            finish_wandb()
+            sys.exit(0)   # Slurm script resubmits
+
+    print(f"Training complete at epoch {epoch}.")
+    finish_wandb()
+    sys.exit(100)   # Slurm script does not resubmit

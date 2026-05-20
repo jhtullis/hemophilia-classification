@@ -51,7 +51,7 @@ def main():
     p.add_argument(
         "--model-type",
         required=True,
-        choices=["5class", "5class_hpc_baseline", "5class_hpc_v0", "3class_scratch", "3class_finetune"],
+        choices=["5class", "5class_hpc_baseline", "5class_hpc_v0", "3class_scratch", "3class_finetune", "patch_v0"],
         help="Which model to train.",
     )
     p.add_argument(
@@ -125,6 +125,9 @@ def main():
     elif args.model_type == "3class_finetune":
         from train_3class import main as _train
         _train(mode="finetune", **common)
+    elif args.model_type == "patch_v0":
+        from train_patch import main as _train
+        _train(**common)
     else:
         print(f"Unknown model-type: {args.model_type}", file=sys.stderr)
         sys.exit(1)
