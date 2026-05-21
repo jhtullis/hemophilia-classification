@@ -68,6 +68,9 @@ _CONFIG = {
     "optimizer":    "Adam",
     "scheduler":    "ReduceLROnPlateau",
     "loss":         "CrossEntropyLoss",
+    # AMP fields populated at runtime by get_gpu_config()
+    "amp_enabled":  None,
+    "amp_dtype":    None,
 }
 
 
@@ -117,7 +120,8 @@ def compute_class_weights(train_class_counts: dict,
 
 def train_one_epoch(model: FibrinCNN, loader: DataLoader,
                     criterion: nn.Module, optimizer: torch.optim.Optimizer,
-                    device: torch.device) -> Tuple[float, float]:
+                    device: torch.device,
+                    scaler, amp_enabled: bool, amp_dtype) -> Tuple[float, float]:
     """Returns (avg_loss, accuracy) over all training batches."""
     model.train()
     total_loss = 0.0
@@ -125,10 +129,12 @@ def train_one_epoch(model: FibrinCNN, loader: DataLoader,
     for images, labels in loader:
         images, labels = images.to(device), labels.to(device)
         optimizer.zero_grad()
-        logits = model(images)
-        loss = criterion(logits, labels)
-        loss.backward()
-        optimizer.step()
+        with torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=amp_enabled):
+            logits = model(images)
+            loss   = criterion(logits, labels)
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
         total_loss += loss.item() * len(labels)
         correct += (logits.detach().argmax(dim=1) == labels).sum().item()
         total += len(labels)
@@ -216,34 +222,24 @@ def _main(
 
     if device is None:
         device = torch.device("cpu")
-    torch.set_num_threads(os.cpu_count() or 4)
+    avail_cpus = int(os.environ.get("SLURM_CPUS_PER_TASK", None) or os.cpu_count() or 4)
+    torch.set_num_threads(avail_cpus)
     torch.manual_seed(SEED)
+
+    from gpu_utils import get_gpu_config
+    gpu_cfg    = get_gpu_config(device, default_batch_size=BATCH_SIZE)
+    batch_size = gpu_cfg["batch_size"]
+    print(f"AMP: {gpu_cfg['amp_enabled']}  dtype: {gpu_cfg['amp_dtype']}  "
+          f"batch_size: {batch_size}  compile: {gpu_cfg['use_compile']}")
 
     pin_memory = device.type == "cuda"
 
     # --- Data ---
     print("Loading data …")
-    train_loader, val_loader, meta = create_dataloaders(
-        db_path=db_path,
-        photo_dir=PHOTO_DIR,
-        batch_size=BATCH_SIZE,
-        train_ratio=TRAIN_RATIO,
-        seed=SEED,
-        gray_method=GRAY_METHOD,
-        pool_factor=POOL_FACTOR,
-        train_record_path=effective_record,
-        preload=preload,
-        force_resplit=force_resplit,
-        # Override pin_memory via DataLoader kwargs isn't directly supported
-        # in create_dataloaders — handled below by rebuilding loaders if needed.
-    )
-
-    # Rebuild loaders with pin_memory=True when on GPU
     if pin_memory:
         from data_loader import (FibrinDataset, make_balanced_sampler,
-                                 load_split_from_record, filter_classes)
+                                 load_split_from_record)
         from preprocessing import make_preprocessor
-        avail_cpus = int(os.environ.get("SLURM_CPUS_PER_TASK", None) or os.cpu_count() or 4)
         num_workers = min(8, max(2, avail_cpus - 1))
         train_df, val_df = load_split_from_record(effective_record, db_path)
         preprocessor = make_preprocessor(gray_method=GRAY_METHOD,
@@ -253,15 +249,36 @@ def _main(
         val_ds   = FibrinDataset(val_df,   PHOTO_DIR, preprocessor,
                                  augment=False, preload=preload)
         sampler      = make_balanced_sampler(train_ds)
-        train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, sampler=sampler,
+        train_loader = DataLoader(train_ds, batch_size=batch_size, sampler=sampler,
                                   num_workers=num_workers, pin_memory=True,
                                   persistent_workers=(num_workers > 0))
-        val_loader   = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False,
+        val_loader   = DataLoader(val_ds, batch_size=batch_size, shuffle=False,
                                   num_workers=num_workers, pin_memory=True,
                                   persistent_workers=(num_workers > 0))
-        meta["train_class_counts"] = {
-            cls: int((train_df["Exp_Type"] == cls).sum()) for cls in CLASS_NAMES
+        meta = {
+            "class_names":        CLASS_NAMES,
+            "train_size":         len(train_ds),
+            "val_size":           len(val_ds),
+            "train_class_counts": {
+                cls: int((train_df["Exp_Type"] == cls).sum()) for cls in CLASS_NAMES
+            },
+            "val_class_counts": {
+                cls: int((val_df["Exp_Type"] == cls).sum()) for cls in CLASS_NAMES
+            },
         }
+    else:
+        train_loader, val_loader, meta = create_dataloaders(
+            db_path=db_path,
+            photo_dir=PHOTO_DIR,
+            batch_size=batch_size,
+            train_ratio=TRAIN_RATIO,
+            seed=SEED,
+            gray_method=GRAY_METHOD,
+            pool_factor=POOL_FACTOR,
+            train_record_path=effective_record,
+            preload=preload,
+            force_resplit=force_resplit,
+        )
 
     print(f"\nClass names:  {meta['class_names']}")
     print(f"Train images (with 4× augmentation): {meta['train_size']}")
@@ -271,6 +288,10 @@ def _main(
 
     # --- Model ---
     model = FibrinCNN(num_classes=len(CLASS_NAMES)).to(device)
+    scaler = torch.cuda.amp.GradScaler(enabled=gpu_cfg["use_scaler"])
+    if gpu_cfg["use_compile"]:
+        print("Compiling model with torch.compile …")
+        model = torch.compile(model)
 
     # --- Loss: inverse-frequency class weights ---
     class_weights = compute_class_weights(meta["train_class_counts"], device)
@@ -302,6 +323,10 @@ def _main(
         ckpt = None
         load_latest_checkpoint(effective_dir)  # prints "Starting from scratch"
 
+    _CONFIG["amp_enabled"] = gpu_cfg["amp_enabled"]
+    _CONFIG["amp_dtype"]   = str(gpu_cfg["amp_dtype"])
+    _CONFIG["batch_size"]  = batch_size
+
     wandb_run_id = ckpt.get("wandb_run_id") if ckpt else None
     init_wandb(
         config={**_CONFIG, "model_type": model_type_str},
@@ -329,14 +354,18 @@ def _main(
 
     print(f"\nTraining epochs {start_epoch}–{end_epoch} of {max_epochs} "
           f"on {device} …\n")
-    print(f"{'Epoch':>6}  {'Train Loss':>12}  {'Train Acc':>10}  "
-          f"{'Val Loss':>10}  {'Val Acc':>10}  {'Time (s)':>10}")
-    print("-" * 65)
+    print(f"{'Epoch':>6}  {'Train CE Loss':>14}  {'Train Acc':>10}  "
+          f"{'Val CE Loss':>12}  {'Val Acc':>10}  {'Time (s)':>10}")
+    print("-" * 68)
 
     for epoch in range(start_epoch, end_epoch + 1):
         t0 = time.time()
-        train_loss, train_acc = train_one_epoch(model, train_loader, criterion,
-                                                optimizer, device)
+        train_loss, train_acc = train_one_epoch(
+            model, train_loader, criterion, optimizer, device,
+            scaler=scaler,
+            amp_enabled=gpu_cfg["amp_enabled"],
+            amp_dtype=gpu_cfg["amp_dtype"],
+        )
         val_acc, val_loss = evaluate_loader(model, val_loader, criterion, device)
         elapsed = time.time() - t0
 
@@ -355,8 +384,8 @@ def _main(
         else:
             tag = ""
 
-        print(f"{epoch:>6}  {train_loss:>12.4f}  {train_acc:>10.4f}  "
-              f"{val_loss:>10.4f}  {val_acc:>10.4f}  {elapsed:>10.1f}{tag}")
+        print(f"{epoch:>6}  {train_loss:>14.4f}  {train_acc:>10.4f}  "
+              f"{val_loss:>12.4f}  {val_acc:>10.4f}  {elapsed:>10.1f}{tag}")
 
         # --- Checkpoint ---
         ckpt_state = {
@@ -375,9 +404,9 @@ def _main(
 
         log_epoch(effective_dir, {
             "epoch":               epoch,
-            "train_loss":          round(train_loss, 6),
+            "train_ce_loss":       round(train_loss, 6),
             "train_acc":           round(train_acc, 6),
-            "val_loss":            round(val_loss, 6),
+            "val_ce_loss":         round(val_loss, 6),
             "val_acc":             round(val_acc, 6),
             "lr":                  current_lr,
             "elapsed_seconds":     round(elapsed, 2),

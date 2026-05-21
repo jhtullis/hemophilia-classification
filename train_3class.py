@@ -136,6 +136,7 @@ def _train_one_epoch(model: FibrinCNN, loader: DataLoader,
                      criterion: nn.Module,
                      optimizer: torch.optim.Optimizer,
                      device: torch.device,
+                     scaler, amp_enabled: bool, amp_dtype,
                      freeze_features: bool = False) -> Tuple[float, float]:
     """Returns (avg_loss, accuracy) for one training epoch."""
     model.train()
@@ -148,10 +149,12 @@ def _train_one_epoch(model: FibrinCNN, loader: DataLoader,
     for images, labels in loader:
         images, labels = images.to(device), labels.to(device)
         optimizer.zero_grad()
-        logits = model(images)
-        loss   = criterion(logits, labels)
-        loss.backward()
-        optimizer.step()
+        with torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=amp_enabled):
+            logits = model(images)
+            loss   = criterion(logits, labels)
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
         total_loss += loss.item() * len(labels)
         correct += (logits.detach().argmax(dim=1) == labels).sum().item()
         total   += len(labels)
@@ -202,6 +205,7 @@ def _run_loop(
     start_epoch, end_epoch, max_epochs,
     initial_phase,  # 1 or 2; from checkpoint on resume
     initial_best_acc, initial_history,
+    scaler=None, amp_enabled: bool = False, amp_dtype=None,
 ) -> Tuple[Dict[str, List[float]], float, int]:
     """Unified epoch loop supporting both phases across Slurm job boundaries.
 
@@ -224,12 +228,14 @@ def _run_loop(
         "optimizer":    "Adam",
         "scheduler":    "ReduceLROnPlateau",
         "loss":         "CrossEntropyLoss",
+        "amp_enabled":  amp_enabled,
+        "amp_dtype":    str(amp_dtype),
     }
 
     print(f"\nTraining epochs {start_epoch}–{end_epoch} of {max_epochs} …\n")
-    print(f"{'Epoch':>6}  {'Phase':>5}  {'Train Loss':>12}  {'Train Acc':>10}  "
-          f"{'Val Loss':>10}  {'Val Acc':>10}  {'Time (s)':>10}")
-    print("-" * 76)
+    print(f"{'Epoch':>6}  {'Phase':>5}  {'Train CE Loss':>14}  {'Train Acc':>10}  "
+          f"{'Val CE Loss':>12}  {'Val Acc':>10}  {'Time (s)':>10}")
+    print("-" * 79)
 
     for epoch in range(start_epoch, end_epoch + 1):
         # Determine phase and optimizer/scheduler for this epoch
@@ -251,6 +257,7 @@ def _run_loop(
         t0 = time.time()
         train_loss, train_acc = _train_one_epoch(
             model, train_loader, criterion, use_opt, device,
+            scaler=scaler, amp_enabled=amp_enabled, amp_dtype=amp_dtype,
             freeze_features=freeze)
         val_acc, val_loss = _evaluate_loader(model, val_loader, criterion, device)
         elapsed = time.time() - t0
@@ -270,8 +277,8 @@ def _run_loop(
         else:
             tag = ""
 
-        print(f"{epoch:>6}  {current_phase:>5}  {train_loss:>12.4f}  "
-              f"{train_acc:>10.4f}  {val_loss:>10.4f}  {val_acc:>10.4f}  "
+        print(f"{epoch:>6}  {current_phase:>5}  {train_loss:>14.4f}  "
+              f"{train_acc:>10.4f}  {val_loss:>12.4f}  {val_acc:>10.4f}  "
               f"{elapsed:>10.1f}{tag}")
 
         # Checkpoint — save both opt/sched states so either phase can resume
@@ -291,9 +298,9 @@ def _run_loop(
 
         log_epoch(model_dir, {
             "epoch":               epoch,
-            "train_loss":          round(train_loss, 6),
+            "train_ce_loss":       round(train_loss, 6),
             "train_acc":           round(train_acc, 6),
-            "val_loss":            round(val_loss, 6),
+            "val_ce_loss":         round(val_loss, 6),
             "val_acc":             round(val_acc, 6),
             "lr":                  current_lr,
             "elapsed_seconds":     round(elapsed, 2),
@@ -314,11 +321,18 @@ def train_scratch(model_dir: str, train_df, val_df,
                   epochs_per_job: int = 200,
                   wandb_enabled: bool = True, wandb_project: str = "fibrin-cnn",
                   wandb_run_name: str = None) -> Tuple[Dict, int]:
+    from gpu_utils import get_gpu_config
+    gpu_cfg    = get_gpu_config(device, default_batch_size=BATCH_SIZE)
+    batch_size = gpu_cfg["batch_size"]
+    print(f"AMP: {gpu_cfg['amp_enabled']}  dtype: {gpu_cfg['amp_dtype']}  "
+          f"batch_size: {batch_size}  compile: {gpu_cfg['use_compile']}")
+
     _config = {
-        "lr_head": LR_HEAD, "weight_decay": WEIGHT_DECAY, "batch_size": BATCH_SIZE,
+        "lr_head": LR_HEAD, "weight_decay": WEIGHT_DECAY, "batch_size": batch_size,
         "gray_method": GRAY_METHOD, "pool_factor": POOL_FACTOR,
         "optimizer": "Adam", "scheduler": "ReduceLROnPlateau",
         "loss": "CrossEntropyLoss", "model_type": "3class_scratch",
+        "amp_enabled": gpu_cfg["amp_enabled"], "amp_dtype": str(gpu_cfg["amp_dtype"]),
     }
     pin_memory = device.type == "cuda"
     preprocessor = make_preprocessor(gray_method=GRAY_METHOD, pool_factor=POOL_FACTOR)
@@ -326,6 +340,10 @@ def train_scratch(model_dir: str, train_df, val_df,
                                               preload=preload, pin_memory=pin_memory)
 
     model     = FibrinCNN(num_classes=3).to(device)
+    scaler    = torch.cuda.amp.GradScaler(enabled=gpu_cfg["use_scaler"])
+    if gpu_cfg["use_compile"]:
+        print("Compiling model with torch.compile …")
+        model = torch.compile(model)
     weights   = _compute_class_weights(train_df, device)
     criterion = nn.CrossEntropyLoss(weight=weights)
     optimizer = torch.optim.Adam(model.parameters(), lr=LR_HEAD,
@@ -373,6 +391,7 @@ def train_scratch(model_dir: str, train_df, val_df,
         device=device, model_dir=model_dir, model_type_str="3class_scratch",
         start_epoch=start_epoch, end_epoch=end_epoch, max_epochs=max_epochs,
         initial_phase=1, initial_best_acc=best_acc, initial_history=history,
+        scaler=scaler, amp_enabled=gpu_cfg["amp_enabled"], amp_dtype=gpu_cfg["amp_dtype"],
     )
     print(f"\nBest validation accuracy: {best:.4f}")
     return history, 100 if end_epoch >= max_epochs else 0
@@ -392,6 +411,12 @@ def train_finetune(model_dir: str, train_df, val_df,
             "Run: python train.py --model-type 5class"
         )
 
+    from gpu_utils import get_gpu_config
+    gpu_cfg    = get_gpu_config(device, default_batch_size=BATCH_SIZE)
+    batch_size = gpu_cfg["batch_size"]
+    print(f"AMP: {gpu_cfg['amp_enabled']}  dtype: {gpu_cfg['amp_dtype']}  "
+          f"batch_size: {batch_size}  compile: {gpu_cfg['use_compile']}")
+
     pin_memory = device.type == "cuda"
     preprocessor = make_preprocessor(gray_method=GRAY_METHOD, pool_factor=POOL_FACTOR)
     train_loader, val_loader = _build_loaders(train_df, val_df, preprocessor,
@@ -400,6 +425,10 @@ def train_finetune(model_dir: str, train_df, val_df,
     model = FibrinCNN(num_classes=5)
     model.classifier[-1] = nn.Linear(128, 3)
     model.to(device)
+    scaler = torch.cuda.amp.GradScaler(enabled=gpu_cfg["use_scaler"])
+    if gpu_cfg["use_compile"]:
+        print("Compiling model with torch.compile …")
+        model = torch.compile(model)
 
     weights   = _compute_class_weights(train_df, device)
     criterion = nn.CrossEntropyLoss(weight=weights)
@@ -455,10 +484,11 @@ def train_finetune(model_dir: str, train_df, val_df,
 
     _ft_config = {
         "lr_head": LR_HEAD, "lr_full": LR_FULL, "weight_decay": WEIGHT_DECAY,
-        "batch_size": BATCH_SIZE, "gray_method": GRAY_METHOD,
+        "batch_size": batch_size, "gray_method": GRAY_METHOD,
         "pool_factor": POOL_FACTOR, "optimizer": "Adam",
         "scheduler": "ReduceLROnPlateau", "loss": "CrossEntropyLoss",
         "model_type": "3class_finetune",
+        "amp_enabled": gpu_cfg["amp_enabled"], "amp_dtype": str(gpu_cfg["amp_dtype"]),
     }
     wandb_run_id = ckpt.get("wandb_run_id") if ckpt else None
     init_wandb(config=_ft_config, model_type="3class_finetune", project=wandb_project,
@@ -483,6 +513,7 @@ def train_finetune(model_dir: str, train_df, val_df,
         start_epoch=start_epoch, end_epoch=end_epoch, max_epochs=max_epochs,
         initial_phase=initial_phase, initial_best_acc=best_acc,
         initial_history=history,
+        scaler=scaler, amp_enabled=gpu_cfg["amp_enabled"], amp_dtype=gpu_cfg["amp_dtype"],
     )
     print(f"\nBest validation accuracy: {best:.4f}")
     return history, 100 if end_epoch >= max_epochs else 0
@@ -519,7 +550,8 @@ def main(mode: str = None, preload: bool = False, db_path: str = DB_PATH,
 
     if device is None:
         device = torch.device("cpu")
-    torch.set_num_threads(os.cpu_count() or 4)
+    avail_cpus = int(os.environ.get("SLURM_CPUS_PER_TASK", None) or os.cpu_count() or 4)
+    torch.set_num_threads(avail_cpus)
     torch.manual_seed(SEED)
 
     model_dir = os.path.join(

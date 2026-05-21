@@ -247,9 +247,16 @@ def main(
 
     os.makedirs(model_dir, exist_ok=True)
 
-    # DataLoader worker count respects SLURM allocation
+    # Thread count and worker count respect SLURM allocation
     avail_cpus = int(os.environ.get("SLURM_CPUS_PER_TASK", None) or os.cpu_count() or 4)
+    torch.set_num_threads(avail_cpus)
     num_workers = min(8, max(2, avail_cpus - 1))
+
+    from gpu_utils import get_gpu_config
+    gpu_cfg = get_gpu_config(device, default_batch_size=batch_size)
+    batch_size = gpu_cfg["batch_size"]
+    print(f"AMP: {gpu_cfg['amp_enabled']}  dtype: {gpu_cfg['amp_dtype']}  "
+          f"batch_size: {batch_size}  compile: {gpu_cfg['use_compile']}")
 
     # ── Data ────────────────────────────────────────────────────────────────
     train_df, val_df, _ = get_or_create_split(model_dir, db_path)
@@ -276,6 +283,10 @@ def main(
 
     # ── Model ────────────────────────────────────────────────────────────────
     model = make_patch_model(num_classes=num_classes).to(device)
+    scaler = torch.cuda.amp.GradScaler(enabled=gpu_cfg["use_scaler"])
+    if gpu_cfg["use_compile"]:
+        print("Compiling model with torch.compile …")
+        model = torch.compile(model)
     augmentation = PatchAugmentation(patch_size=PATCH_SIZE).to(device)
     center_crop = K.CenterCrop(PATCH_SIZE)
     class_weights = _compute_class_weights(train_df, device)
@@ -320,6 +331,8 @@ def main(
         "num_classes": num_classes,
         "max_epochs": max_epochs,
         "epochs_per_job": epochs_per_job,
+        "amp_enabled": gpu_cfg["amp_enabled"],
+        "amp_dtype":   str(gpu_cfg["amp_dtype"]),
     }
     init_wandb(
         config=config,
@@ -348,10 +361,13 @@ def main(
             patches = augmentation(patches)   # 283→200 with rotation + flips
 
             optimizer.zero_grad()
-            sims = model(patches)
-            loss = cosine_loss(sims, labels, class_weights)
-            loss.backward()
-            optimizer.step()
+            with torch.autocast(device_type="cuda", dtype=gpu_cfg["amp_dtype"],
+                                enabled=gpu_cfg["amp_enabled"]):
+                sims = model(patches)
+                loss = cosine_loss(sims, labels, class_weights)
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
             train_loss_sum += loss.item() * len(labels)
             train_correct += (sims.argmax(1) == labels).sum().item()
@@ -408,9 +424,9 @@ def main(
 
         row = {
             "epoch": epoch,
-            "train_loss": round(train_loss, 6),
+            "train_cosine_loss": round(train_loss, 6),
             "train_acc": round(train_acc, 6),
-            "val_loss": round(val_loss, 6),
+            "val_cosine_loss": round(val_loss, 6),
             "val_acc": round(val_acc, 6),
             "train_mean_max_sim": round(train_cos["mean_max_sim"], 6),
             "train_intra_cos": round(train_cos["intra_class_cos"], 6),
@@ -429,8 +445,8 @@ def main(
 
         print(
             f"Epoch {epoch:5d} | "
-            f"train loss={train_loss:.4f} acc={train_acc:.3f} | "
-            f"val loss={val_loss:.4f} acc={val_acc:.3f} | "
+            f"train cosine_loss={train_loss:.4f} acc={train_acc:.3f} | "
+            f"val cosine_loss={val_loss:.4f} acc={val_acc:.3f} | "
             f"sil(tr={train_cos['silhouette']:.3f} va={val_cos['silhouette']:.3f}) | "
             f"lr={optimizer.param_groups[0]['lr']:.2e}"
             + (" ← best" if is_best else "")
