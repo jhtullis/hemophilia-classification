@@ -10,15 +10,15 @@
 #SBATCH --mail-type=FAIL
 #SBATCH --signal=B:USR1@300
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="${SLURM_SUBMIT_DIR:-$(pwd)}"
 
-trap 'echo "Wall time approaching — resubmitting..."; sbatch "$SCRIPT_DIR/train_patch_v0.sh"; exit 0' USR1
+trap 'echo "Wall time approaching — resubmitting..."; sbatch "${PROJECT_DIR}/slurm/train_patch_v0.sh"; exit 0' USR1
 
 module load miniforge3
 conda activate fibrin
 
 export WANDB_MODE=offline
-export WANDB_DIR="${SCRIPT_DIR}/../models/patch_v0"
+export WANDB_DIR="${PROJECT_DIR}/models/patch_v0"
 
 python train.py --model-type patch_v0 \
     --max-epochs 10000 --epochs-per-job 100 --resume --preload &
@@ -28,5 +28,5 @@ wait $PY_PID
 EXIT_CODE=$?
 if [ $EXIT_CODE -eq 0 ]; then
     echo "Resubmitting continuation job..."
-    sbatch "$SCRIPT_DIR/train_patch_v0.sh"
+    sbatch "${PROJECT_DIR}/slurm/train_patch_v0.sh"
 fi
