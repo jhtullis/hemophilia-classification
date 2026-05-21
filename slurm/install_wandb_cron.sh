@@ -14,8 +14,8 @@ echo "$EXPIRY" > "$EXPIRY_FILE"
 if crontab -l 2>/dev/null | grep -q "sync_wandb_cron.sh"; then
     echo "Cron entry already exists — updating expiry to $EXPIRY."
 else
-    (crontab -l 2>/dev/null; echo "0 */3 * * * bash $CRON_SCRIPT") | crontab -
-    echo "Cron job installed: runs every 3 hours until $EXPIRY."
+    (crontab -l 2>/dev/null; echo "*/15 * * * * bash $CRON_SCRIPT") | crontab -
+    echo "Cron job installed: runs every 15 minutes until $EXPIRY."
 fi
 
 echo "Log file: $REPO_DIR/slurm/logs/wandb_sync_cron.log"
