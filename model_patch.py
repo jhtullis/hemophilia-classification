@@ -53,9 +53,14 @@ def _make_block(in_ch: int, out_ch: int) -> nn.Sequential:
 
 
 class FibrinPatchCNN(nn.Module):
-    """Patch-based CNN with stride-2 downsampling and cosine classifier."""
+    """Patch-based CNN with stride-2 downsampling and cosine classifier.
 
-    def __init__(self, num_classes: int = 5) -> None:
+    Args:
+        num_classes: Number of output classes (default 5).
+        dropout_p:   Dropout probability in classifier head (default 0.5).
+    """
+
+    def __init__(self, num_classes: int = 5, dropout_p: float = 0.5) -> None:
         super().__init__()
         self.features = nn.Sequential(
             _make_block(1, 32),                              # → (N, 32, 100, 100)
@@ -67,7 +72,7 @@ class FibrinPatchCNN(nn.Module):
         self.classifier = nn.Sequential(
             nn.Linear(256, 128),
             nn.ReLU(inplace=True),
-            nn.Dropout(p=0.5),
+            nn.Dropout(p=dropout_p),
             NormalizedLinear(128, num_classes),
         )
 
@@ -85,8 +90,8 @@ class FibrinPatchCNN(nn.Module):
         return F.normalize(x, dim=1)
 
 
-def make_patch_model(num_classes: int = 5) -> FibrinPatchCNN:
-    model = FibrinPatchCNN(num_classes=num_classes)
+def make_patch_model(num_classes: int = 5, dropout_p: float = 0.5) -> FibrinPatchCNN:
+    model = FibrinPatchCNN(num_classes=num_classes, dropout_p=dropout_p)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"FibrinPatchCNN: {n_params:,} parameters, {num_classes} classes")
     return model

@@ -142,15 +142,22 @@ class FibrinCNNCosine(FibrinCNN):
     Training uses cosine loss (train_5class_hpc.py).
     Evaluation uses evaluate_cosine.py.
     Argmax of similarities gives predicted class — identical to logit argmax.
+
+    Args:
+        num_classes: Number of output classes (default 5).
+        dropout_p:   Dropout probability in classifier head (default 0.5).
     """
 
-    def __init__(self, num_classes: int = 5):
+    def __init__(self, num_classes: int = 5, dropout_p: float = 0.5):
         super().__init__(num_classes=num_classes)
-        # Replace the final Linear with NormalizedLinear; keep all other layers
-        in_features = self.classifier[-1].in_features
-        self.classifier[-1] = NormalizedLinear(in_features, num_classes)
+        # Rebuild the full classifier head with configurable dropout and
+        # NormalizedLinear output. Default dropout_p=0.5 preserves v0 behaviour.
+        self.classifier = nn.Sequential(
+            nn.Linear(256, 128),
+            nn.ReLU(inplace=True),
+            nn.Dropout(p=dropout_p),
+            NormalizedLinear(128, num_classes),
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Inherited forward; classifier[-1] is now NormalizedLinear,
-        # so output is cosine similarities, not logits.
         return super().forward(x)

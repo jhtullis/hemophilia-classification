@@ -61,6 +61,7 @@ from checkpoint_manager import (finish_wandb, get_wandb_run_id, init_wandb,
                                  save_checkpoint)
 from data_loader import CLASS_NAMES, create_dataloaders
 from evaluate import evaluate_model
+from lr_schedulers import CosineAnnealingWarmRestartsF
 from model import FibrinCNNCosine
 
 # ---------------------------------------------------------------------------
@@ -173,7 +174,8 @@ def compute_class_weights(train_class_counts: dict,
 # ---------------------------------------------------------------------------
 
 def train_one_epoch(model, loader, class_weights, optimizer, device,
-                    scaler, amp_enabled, amp_dtype) -> Tuple[float, float]:
+                    scaler, amp_enabled, amp_dtype,
+                    grad_clip=None) -> Tuple[float, float]:
     """Returns (avg_cosine_loss, accuracy)."""
     model.train()
     total_loss = 0.0
@@ -185,6 +187,9 @@ def train_one_epoch(model, loader, class_weights, optimizer, device,
             sims = model(images)                     # (B, C) cosine similarities
             loss = cosine_loss(sims, labels, class_weights)
         scaler.scale(loss).backward()
+        if grad_clip is not None:
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         scaler.step(optimizer)
         scaler.update()
         total_loss += loss.item() * len(labels)
@@ -302,9 +307,13 @@ def main(
     wandb_enabled: bool = True,
     wandb_project: str = "fibrin-cnn",
     wandb_run_name: str = None,
+    config_name: str = "5class_hpc_v0",
 ) -> None:
-    os.makedirs(MODEL_DIR, exist_ok=True)
-    log_path = os.path.join(MODEL_DIR, "training_log.txt")
+    from configs.training_configs import CONFIGS
+    cfg = CONFIGS[config_name]
+    model_dir = os.path.join(_DIR, cfg["model_dir"])
+    os.makedirs(model_dir, exist_ok=True)
+    log_path = os.path.join(model_dir, "training_log.txt")
     print(f"Training log → {log_path}")
     with _Tee(log_path):
         _exit_code = _main(
@@ -313,6 +322,7 @@ def main(
             wandb_enabled=wandb_enabled,
             wandb_project=wandb_project,
             wandb_run_name=wandb_run_name,
+            config_name=config_name,
         )
     sys.exit(_exit_code)
 
@@ -327,7 +337,20 @@ def _main(
     wandb_enabled: bool = True,
     wandb_project: str = "fibrin-cnn",
     wandb_run_name: str = None,
+    config_name: str = "5class_hpc_v0",
 ) -> int:
+    from configs.training_configs import CONFIGS
+    cfg          = CONFIGS[config_name]
+    MODEL_DIR    = os.path.join(_DIR, cfg["model_dir"])
+    MODEL_PATH   = os.path.join(MODEL_DIR, "best_model.pth")
+    RECORD_PATH  = os.path.join(MODEL_DIR, "train_record.json")
+    LR           = cfg["lr"]
+    WEIGHT_DECAY = cfg["weight_decay"]
+    T_MULT       = cfg["T_mult"]
+    ETA_MIN      = cfg["eta_min"]
+    DROPOUT_P    = cfg["dropout"]
+    GRAD_CLIP    = cfg.get("grad_clip")
+
     if device is None:
         device = torch.device("cpu")
     avail_cpus = int(os.environ.get("SLURM_CPUS_PER_TASK", None) or os.cpu_count() or 4)
@@ -335,7 +358,7 @@ def _main(
     torch.manual_seed(SEED)
 
     from gpu_utils import get_gpu_config
-    gpu_cfg    = get_gpu_config(device, default_batch_size=BATCH_SIZE)
+    gpu_cfg    = get_gpu_config(device, default_batch_size=cfg["batch_size"])
     batch_size = gpu_cfg["batch_size"]
     print(f"AMP: {gpu_cfg['amp_enabled']}  dtype: {gpu_cfg['amp_dtype']}  "
           f"batch_size: {batch_size}  compile: {gpu_cfg['use_compile']}")
@@ -398,7 +421,7 @@ def _main(
     print("Train class counts (base):", meta["train_class_counts"])
 
     # --- Model ---
-    model = FibrinCNNCosine(num_classes=len(CLASS_NAMES)).to(device)
+    model = FibrinCNNCosine(num_classes=len(CLASS_NAMES), dropout_p=DROPOUT_P).to(device)
     scaler = torch.cuda.amp.GradScaler(enabled=gpu_cfg["use_scaler"])
     if gpu_cfg["use_compile"]:
         print("Compiling model with torch.compile …")
@@ -411,8 +434,8 @@ def _main(
     # --- Optimizer + scheduler ---
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR,
                                   weight_decay=WEIGHT_DECAY)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer, T_0=100, T_mult=2, eta_min=1e-6
+    scheduler = CosineAnnealingWarmRestartsF(
+        optimizer, T_0=cfg["T_0"], T_mult=T_MULT, eta_min=ETA_MIN
     )
 
     # --- Resume from checkpoint ---
@@ -437,11 +460,16 @@ def _main(
     _CONFIG["amp_enabled"] = gpu_cfg["amp_enabled"]
     _CONFIG["amp_dtype"]   = str(gpu_cfg["amp_dtype"])
     _CONFIG["batch_size"]  = batch_size
+    _CONFIG["scheduler_Tmult"]   = T_MULT
+    _CONFIG["scheduler_eta_min"] = ETA_MIN
+    _CONFIG["dropout_p"]  = DROPOUT_P
+    _CONFIG["grad_clip"]  = GRAD_CLIP
+    _CONFIG["variant"]    = config_name
 
     wandb_run_id = ckpt.get("wandb_run_id") if ckpt else None
     init_wandb(
-        config={**_CONFIG, "model_type": "5class_hpc_v0"},
-        model_type="5class_hpc_v0",
+        config={**_CONFIG, "model_type": config_name},
+        model_type=config_name,
         project=wandb_project,
         entity=None,
         run_name=wandb_run_name,
@@ -474,6 +502,7 @@ def _main(
             scaler=scaler,
             amp_enabled=gpu_cfg["amp_enabled"],
             amp_dtype=gpu_cfg["amp_dtype"],
+            grad_clip=GRAD_CLIP,
         )
         val_acc, val_loss = evaluate_loader(model, val_loader,
                                             class_weights, device)
@@ -512,7 +541,7 @@ def _main(
             "scheduler_state_dict": scheduler.state_dict(),
             "best_acc":             best_acc,
             "history":              history,
-            "model_type":           "5class_hpc_v0",
+            "model_type":           config_name,
             "phase":                1,
             "config":               _CONFIG,
             "wandb_run_id":         get_wandb_run_id(),
@@ -529,7 +558,7 @@ def _main(
             "elapsed_seconds":     round(elapsed, 2),
             "wall_clock_time":     datetime.utcnow().isoformat(),
             "best_val_acc_so_far": round(best_acc, 6),
-            "model_type":          "5class_hpc_v0",
+            "model_type":          config_name,
             "phase":               1,
         }
         row.update({k: round(v, 6) for k, v in cosine_metrics.items()})

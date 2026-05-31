@@ -30,6 +30,7 @@ from torch.utils.data import DataLoader
 import kornia.augmentation as K
 
 from augmentation_patch import PatchAugmentation
+from lr_schedulers import CosineAnnealingWarmRestartsF
 from checkpoint_manager import (
     finish_wandb,
     get_wandb_run_id,
@@ -229,15 +230,23 @@ def main(
     wandb_enabled: bool = True,
     wandb_project: str = "fibrin-cnn",
     wandb_run_name: Optional[str] = None,
-    model_dir: str = "models/patch_v0",
     db_path: Optional[str] = None,
     photo_dir: str = "data/photos",
-    batch_size: int = 64,
-    lr: float = 1e-3,
-    weight_decay: float = 1e-3,
-    patches_per_image: int = PATCHES_PER_IMAGE,
     num_classes: int = 5,
+    config_name: str = "patch_v0",
 ) -> None:
+    from configs.training_configs import CONFIGS
+    cfg          = CONFIGS[config_name]
+    model_dir    = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                cfg["model_dir"])
+    lr           = cfg["lr"]
+    weight_decay = cfg["weight_decay"]
+    T_MULT       = cfg["T_mult"]
+    ETA_MIN      = cfg["eta_min"]
+    DROPOUT_P    = cfg["dropout"]
+    GRAD_CLIP    = cfg.get("grad_clip")
+    patches_per_image = cfg["patches_per_img"]
+
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if db_path is None:
@@ -253,7 +262,7 @@ def main(
     num_workers = min(8, max(2, avail_cpus - 1))
 
     from gpu_utils import get_gpu_config
-    gpu_cfg = get_gpu_config(device, default_batch_size=batch_size)
+    gpu_cfg = get_gpu_config(device, default_batch_size=cfg["batch_size"])
     batch_size = gpu_cfg["batch_size"]
     print(f"AMP: {gpu_cfg['amp_enabled']}  dtype: {gpu_cfg['amp_dtype']}  "
           f"batch_size: {batch_size}  compile: {gpu_cfg['use_compile']}")
@@ -282,7 +291,7 @@ def main(
     )
 
     # ── Model ────────────────────────────────────────────────────────────────
-    model = make_patch_model(num_classes=num_classes).to(device)
+    model = make_patch_model(num_classes=num_classes, dropout_p=DROPOUT_P).to(device)
     scaler = torch.cuda.amp.GradScaler(enabled=gpu_cfg["use_scaler"])
     if gpu_cfg["use_compile"]:
         print("Compiling model with torch.compile …")
@@ -293,8 +302,8 @@ def main(
 
     # ── Optimizer + scheduler ────────────────────────────────────────────────
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer, T_0=100, T_mult=2, eta_min=1e-6
+    scheduler = CosineAnnealingWarmRestartsF(
+        optimizer, T_0=cfg["T_0"], T_mult=T_MULT, eta_min=ETA_MIN
     )
 
     # ── Checkpoint resume ────────────────────────────────────────────────────
@@ -315,15 +324,17 @@ def main(
 
     # ── Wandb ────────────────────────────────────────────────────────────────
     config = {
-        "model_type": "patch_v0",
+        "model_type": config_name,
         "lr": lr,
         "weight_decay": weight_decay,
         "batch_size": batch_size,
         "optimizer": "AdamW",
         "scheduler": "CosineAnnealingWarmRestarts",
-        "scheduler_T0": 100,
-        "scheduler_Tmult": 2,
-        "scheduler_eta_min": 1e-6,
+        "scheduler_T0": cfg["T_0"],
+        "scheduler_Tmult": T_MULT,
+        "scheduler_eta_min": ETA_MIN,
+        "dropout_p": DROPOUT_P,
+        "grad_clip": GRAD_CLIP,
         "loss": "CosineLoss",
         "patch_size": PATCH_SIZE,
         "oversized": OVERSIZED,
@@ -333,15 +344,17 @@ def main(
         "epochs_per_job": epochs_per_job,
         "amp_enabled": gpu_cfg["amp_enabled"],
         "amp_dtype":   str(gpu_cfg["amp_dtype"]),
+        "variant": config_name,
     }
     init_wandb(
         config=config,
-        model_type="patch_v0",
+        model_type=config_name,
         project=wandb_project,
-        run_name=wandb_run_name or "patch_v0",
+        run_name=wandb_run_name or config_name,
         run_id=wandb_run_id,
-        resume_run=(wandb_run_id is not None),
+        resume_run=(resume and wandb_run_id is not None),
         enabled=wandb_enabled,
+        entity=None,
     )
 
     # ── Training loop ────────────────────────────────────────────────────────
@@ -366,6 +379,9 @@ def main(
                 sims = model(patches)
                 loss = cosine_loss(sims, labels, class_weights)
             scaler.scale(loss).backward()
+            if GRAD_CLIP is not None:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)
             scaler.step(optimizer)
             scaler.update()
 
@@ -437,7 +453,7 @@ def main(
             "val_inter_cos": round(val_cos["inter_class_cos"], 6),
             "val_silhouette": round(val_cos["silhouette"], 6),
             "lr": optimizer.param_groups[0]["lr"],
-            "model_type": "patch_v0",
+            "model_type": config_name,
             "wall_clock_time": datetime.now(timezone.utc).isoformat(),
         }
         log_epoch(model_dir, row)
@@ -460,7 +476,7 @@ def main(
             "scheduler_state_dict": scheduler.state_dict(),
             "best_acc": best_val_acc,
             "history": history,
-            "model_type": "patch_v0",
+            "model_type": config_name,
             "phase": "training",
             "config": config,
             "wandb_run_id": get_wandb_run_id(),

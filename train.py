@@ -51,7 +51,12 @@ def main():
     p.add_argument(
         "--model-type",
         required=True,
-        choices=["5class", "5class_hpc_baseline", "5class_hpc_v0", "3class_scratch", "3class_finetune", "patch_v0"],
+        choices=[
+            "5class", "5class_hpc_baseline", "5class_hpc_v0",
+            "5class_hpc_v1a", "5class_hpc_v1b", "5class_hpc_v1c",
+            "3class_scratch", "3class_finetune",
+            "patch_v0", "patch_v1a", "patch_v1b", "patch_v1c",
+        ],
         help="Which model to train.",
     )
     p.add_argument(
@@ -116,18 +121,18 @@ def main():
         _train(**common, force_resplit=args.force_resplit,
                model_dir=os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                       "models", "5class_hpc_baseline"))
-    elif args.model_type == "5class_hpc_v0":
+    elif args.model_type in ("5class_hpc_v0", "5class_hpc_v1a", "5class_hpc_v1b", "5class_hpc_v1c"):
         from train_5class_hpc import main as _train
-        _train(**common)
+        _train(**common, config_name=args.model_type)
     elif args.model_type == "3class_scratch":
         from train_3class import main as _train
         _train(mode="scratch", **common)
     elif args.model_type == "3class_finetune":
         from train_3class import main as _train
         _train(mode="finetune", **common)
-    elif args.model_type == "patch_v0":
+    elif args.model_type in ("patch_v0", "patch_v1a", "patch_v1b", "patch_v1c"):
         from train_patch import main as _train
-        _train(**common)
+        _train(**common, config_name=args.model_type)
     else:
         print(f"Unknown model-type: {args.model_type}", file=sys.stderr)
         sys.exit(1)

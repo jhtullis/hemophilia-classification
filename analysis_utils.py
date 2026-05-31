@@ -48,8 +48,15 @@ MODEL_REGISTRY: Dict[str, Tuple[str, int, dict]] = {
     "5class":               (os.path.join(_DIR, "models", "5class"),               5, CLASS_MAP),
     "5class_hpc_baseline":  (os.path.join(_DIR, "models", "5class_hpc_baseline"),  5, CLASS_MAP),
     "5class_hpc_v0":        (os.path.join(_DIR, "models", "5class_hpc_v0"),        5, CLASS_MAP),
+    "5class_hpc_v1a":       (os.path.join(_DIR, "models", "5class_hpc_v1a"),       5, CLASS_MAP),
+    "5class_hpc_v1b":       (os.path.join(_DIR, "models", "5class_hpc_v1b"),       5, CLASS_MAP),
+    "5class_hpc_v1c":       (os.path.join(_DIR, "models", "5class_hpc_v1c"),       5, CLASS_MAP),
     "3class_scratch":       (os.path.join(_DIR, "models", "3class_hemo"),           3, CLASS_MAP_3),
     "3class_finetune":      (os.path.join(_DIR, "models", "3class_hemo_finetune"),  3, CLASS_MAP_3),
+    "patch_v0":             (os.path.join(_DIR, "models", "patch_v0"),              5, CLASS_MAP),
+    "patch_v1a":            (os.path.join(_DIR, "models", "patch_5class_v1a"),      5, CLASS_MAP),
+    "patch_v1b":            (os.path.join(_DIR, "models", "patch_5class_v1b"),      5, CLASS_MAP),
+    "patch_v1c":            (os.path.join(_DIR, "models", "patch_5class_v1c"),      5, CLASS_MAP),
 }
 
 # ---------------------------------------------------------------------------
@@ -77,7 +84,8 @@ def load_model_from_registry(
 
     Args:
         model_type: One of "5class", "5class_hpc_baseline", "5class_hpc_v0",
-                    "3class_scratch", "3class_finetune".
+                    "5class_hpc_v1a/b/c", "3class_scratch", "3class_finetune",
+                    "patch_v0", "patch_v1a/b/c".
         device:     torch.device to load model onto.
 
     Returns:
@@ -91,8 +99,13 @@ def load_model_from_registry(
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"No trained model at {model_path}. "
                                 "Train the model first.")
-    # Cosine-head models require FibrinCNNCosine; all others (including 5class_hpc_baseline) use FibrinCNN
-    if model_type == "5class_hpc_v0":
+    if "patch" in model_type:
+        from model_patch import FibrinPatchCNN
+        model = FibrinPatchCNN(num_classes=num_classes)
+        sd = torch.load(model_path, map_location=device, weights_only=True)
+        model.load_state_dict(sd)
+        model.to(device).eval()
+    elif "hpc" in model_type:
         from model import FibrinCNNCosine
         model = FibrinCNNCosine(num_classes=num_classes)
         sd = torch.load(model_path, map_location=device, weights_only=True)
