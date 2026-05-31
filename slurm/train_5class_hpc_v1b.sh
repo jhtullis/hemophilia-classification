@@ -21,7 +21,7 @@ export WANDB_MODE=offline
 export WANDB_DIR="${PROJECT_DIR}/models/5class_hpc_v1b"
 
 python train.py --model-type 5class_hpc_v1b \
-    --max-epochs 10000 --epochs-per-job 100 --resume --preload &
+    --max-epochs 10000 --epochs-per-job 1500 --resume --preload &
 PY_PID=$!
 wait $PY_PID
 

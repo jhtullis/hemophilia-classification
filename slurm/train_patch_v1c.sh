@@ -21,7 +21,7 @@ export WANDB_MODE=offline
 export WANDB_DIR="${PROJECT_DIR}/models/patch_5class_v1c"
 
 python train.py --model-type patch_v1c \
-    --max-epochs 10000 --epochs-per-job 100 --resume --preload &
+    --max-epochs 10000 --epochs-per-job 600 --resume --preload &
 PY_PID=$!
 wait $PY_PID
 
