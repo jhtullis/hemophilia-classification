@@ -5,6 +5,7 @@ __pycache__
 old
 test_output/
 .pytest_cache/
+models/
 models/*/analysis/gradcam/misclassified/
 models/*/analysis/gradcam/all_overlays/
 models/*/analysis/gradcam/gradcam_summary.txt
