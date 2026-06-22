@@ -313,7 +313,10 @@ def main(
     # ── Checkpoint resume ────────────────────────────────────────────────────
     ckpt = load_latest_checkpoint(model_dir) if resume else None
     if ckpt is not None:
-        model.load_state_dict(ckpt["model_state_dict"])
+        sd = ckpt["model_state_dict"]
+        if any(k.startswith("_orig_mod.") for k in sd):
+            sd = {k[len("_orig_mod."):]: v for k, v in sd.items()}
+        model.load_state_dict(sd)
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         scheduler.load_state_dict(ckpt["scheduler_state_dict"])
         start_epoch = ckpt["epoch"] + 1
@@ -363,6 +366,11 @@ def main(
     )
 
     # ── Training loop ────────────────────────────────────────────────────────
+    if start_epoch >= max_epochs:
+        print(f"Already reached max_epochs={max_epochs}. Training complete.")
+        finish_wandb()
+        sys.exit(100)
+
     job_epochs_done = 0
 
     for epoch in range(start_epoch, max_epochs):
@@ -497,7 +505,7 @@ def main(
         # Checkpointing
         state = {
             "epoch": epoch,
-            "model_state_dict": model.state_dict(),
+            "model_state_dict": getattr(model, "_orig_mod", model).state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "scheduler_state_dict": scheduler.state_dict(),
             "best_acc": best_val_acc,
@@ -515,6 +523,6 @@ def main(
             finish_wandb(complete=False)
             sys.exit(0)   # Slurm script resubmits
 
-    print(f"Training complete at epoch {epoch}.")
+    print(f"Training complete at epoch {max_epochs - 1}.")
     finish_wandb()
     sys.exit(100)   # Slurm script does not resubmit

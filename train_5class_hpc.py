@@ -447,7 +447,10 @@ def _main(
     if resume:
         ckpt = load_latest_checkpoint(MODEL_DIR)
         if ckpt is not None:
-            model.load_state_dict(ckpt["model_state_dict"])
+            sd = ckpt["model_state_dict"]
+            if any(k.startswith("_orig_mod.") for k in sd):
+                sd = {k[len("_orig_mod."):]: v for k, v in sd.items()}
+            model.load_state_dict(sd)
             optimizer.load_state_dict(ckpt["optimizer_state_dict"])
             scheduler.load_state_dict(ckpt["scheduler_state_dict"])
             best_acc    = ckpt["best_acc"]
@@ -536,7 +539,7 @@ def _main(
         # --- Checkpoint ---
         ckpt_state = {
             "epoch":                epoch,
-            "model_state_dict":     model.state_dict(),
+            "model_state_dict":     getattr(model, "_orig_mod", model).state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "scheduler_state_dict": scheduler.state_dict(),
             "best_acc":             best_acc,
