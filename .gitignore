@@ -16,3 +16,5 @@ models/*/analysis/preprocessing/preprocessing_comparison_table.csv
 models/*/analysis/activation/spatial_activation_stats.csv
 slurm/logs/
 slurm/wandb_cron_expiry.txt
+
+patch_validation/
