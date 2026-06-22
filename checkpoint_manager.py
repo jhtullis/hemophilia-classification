@@ -83,13 +83,28 @@ def init_wandb(
         return None
 
 
-def finish_wandb() -> None:
-    """Mark the active W&B run as finished. No-op if no run is active."""
+def finish_wandb(complete: bool = True) -> None:
+    """Flush (and optionally mark finished) the active W&B run.
+
+    Args:
+        complete: If True (default), mark the run as finished — use this when
+                  max_epochs is reached. If False, call wandb.mark_preempting()
+                  which flushes buffered metrics and sets status to "preempted"
+                  (not "finished") so the next job can resume the same run.
+    """
     global _wandb_run
     if _wandb_run is not None:
         import wandb
-        wandb.finish()
-        _wandb_run = None
+        if complete:
+            wandb.finish()
+            _wandb_run = None
+        else:
+            # Mark preempted: flushes all pending metrics without closing the run.
+            # The next Slurm job resumes via init_wandb(resume_run=True, run_id=...).
+            try:
+                wandb.mark_preempting()
+            except Exception:
+                pass
 
 
 def get_wandb_run_id() -> str | None:

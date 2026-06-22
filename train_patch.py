@@ -486,7 +486,7 @@ def main(
         job_epochs_done += 1
         if job_epochs_done >= epochs_per_job:
             print(f"epochs_per_job={epochs_per_job} exhausted at epoch {epoch}. Exiting.")
-            finish_wandb()
+            finish_wandb(complete=False)
             sys.exit(0)   # Slurm script resubmits
 
     print(f"Training complete at epoch {epoch}.")

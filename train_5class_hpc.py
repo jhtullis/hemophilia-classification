@@ -581,7 +581,7 @@ def _main(
         return 100
     else:
         print(f"Job quota reached (epoch {end_epoch}). Resubmit to continue.")
-        finish_wandb()
+        finish_wandb(complete=False)
         return 0
 
 
