@@ -350,7 +350,103 @@ def save_summary(
     fig.savefig(os.path.join(summary_dir, "confusion_voting.png"), dpi=100)
     plt.close(fig)
 
-    # ── 7. overall_stats.txt ──────────────────────────────────────────────────
+    # ── 7–9. Per-image patch accuracy distributions ───────────────────────────
+    # Derive integer correct-patch count from the stored fraction.
+    n_patches_per_img = int(round(len(patch_df) / max(len(image_df), 1)))
+    n_correct_per_img = (image_df["patch_accuracy"] * n_patches_per_img).round().astype(int)
+
+    # 7. Stacked histogram: count of correct patches per image, colored by class
+    bins = np.arange(-0.5, n_patches_per_img + 1.5, 1)
+    cls_counts = [
+        n_correct_per_img[image_df["Exp_Type"] == c].values for c in CLASS_NAMES
+    ]
+    fig, ax = plt.subplots(figsize=(max(9, n_patches_per_img * 0.55 + 2), 4.5))
+    ax.hist(cls_counts, bins=bins, stacked=True, color=cls_colors, label=CLASS_NAMES,
+            edgecolor="white", linewidth=0.4)
+    ax.set_xlabel(f"Patches correct per image  (out of {n_patches_per_img})", fontsize=10)
+    ax.set_ylabel("Images", fontsize=10)
+    ax.set_title(
+        f"{model_type}  ·  {split}  ·  Correct patch count distribution (stacked by class)",
+        fontsize=10)
+    ax.legend(fontsize=9)
+    ax.set_xticks(range(0, n_patches_per_img + 1))
+    fig.tight_layout()
+    fig.savefig(os.path.join(summary_dir, "patch_count_histogram.png"), dpi=100)
+    plt.close(fig)
+
+    # 8. Boxplot + jitter: per-image patch accuracy (%) by class
+    cls_pa = [
+        image_df[image_df["Exp_Type"] == c]["patch_accuracy"].values * 100
+        for c in CLASS_NAMES
+    ]
+    fig, ax = plt.subplots(figsize=(8, 5))
+    bp = ax.boxplot(
+        cls_pa, positions=range(n_cls), widths=0.55, patch_artist=True,
+        medianprops=dict(color="black", linewidth=2),
+        whiskerprops=dict(linewidth=1.2),
+        capprops=dict(linewidth=1.2),
+        flierprops=dict(marker=""),   # hide built-in outlier dots; show all via scatter
+    )
+    for patch, color in zip(bp["boxes"], cls_colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.45)
+    for ci, (color, vals) in enumerate(zip(cls_colors, cls_pa)):
+        rng = np.random.default_rng(ci)
+        jitter = rng.uniform(-0.22, 0.22, len(vals))
+        ax.scatter(ci + jitter, vals, color=color, s=28, alpha=0.82, zorder=3,
+                   edgecolors="white", linewidths=0.4)
+    ax.set_xticks(range(n_cls))
+    ax.set_xticklabels(CLASS_NAMES, fontsize=10)
+    ax.set_ylim(-5, 108)
+    ax.set_ylabel("Patch accuracy per image (%)", fontsize=10)
+    ax.set_title(
+        f"{model_type}  ·  {split}  ·  Per-image patch accuracy by class",
+        fontsize=10)
+    ax.axhline(50, color="gray", linestyle=":", linewidth=0.8, alpha=0.6)
+    fig.tight_layout()
+    fig.savefig(os.path.join(summary_dir, "patch_acc_by_class_dist.png"), dpi=100)
+    plt.close(fig)
+
+    # 9. Strip plot by experiment: each dot = one image, median line per experiment
+    exp_order: List[Tuple[str, str]] = []
+    for cls in CLASS_NAMES:
+        for exp in sorted(image_df[image_df["Exp_Type"] == cls]["Experiment"].unique()):
+            exp_order.append((exp, cls))
+
+    fig, ax = plt.subplots(figsize=(max(10, len(exp_order) * 0.85 + 2), 5))
+    for ei, (exp, cls) in enumerate(exp_order):
+        vals = image_df[image_df["Experiment"] == exp]["patch_accuracy"].values * 100
+        color = CLASS_COLORS.get(cls, "#888888")
+        rng = np.random.default_rng(ei)
+        jitter = rng.uniform(-0.26, 0.26, len(vals))
+        ax.scatter(ei + jitter, vals, color=color, s=28, alpha=0.82, zorder=3,
+                   edgecolors="white", linewidths=0.4)
+        ax.plot([ei - 0.38, ei + 0.38], [np.median(vals), np.median(vals)],
+                color=color, linewidth=2.5, zorder=4, solid_capstyle="round")
+    ax.set_xticks(range(len(exp_order)))
+    ax.set_xticklabels(
+        [f"{e}\n({c})" for e, c in exp_order],
+        rotation=45, ha="right", fontsize=7.5,
+    )
+    ax.set_ylim(-5, 108)
+    ax.set_ylabel("Patch accuracy per image (%)", fontsize=10)
+    ax.set_title(
+        f"{model_type}  ·  {split}  ·  Per-image patch accuracy by experiment",
+        fontsize=10)
+    # Vertical separators between classes
+    prev_cls = None
+    for ei, (_, cls) in enumerate(exp_order):
+        if prev_cls is not None and cls != prev_cls:
+            ax.axvline(ei - 0.5, color="gray", linestyle="--", linewidth=0.8, alpha=0.45)
+        prev_cls = cls
+    ax.axhline(50, color="gray", linestyle=":", linewidth=0.8, alpha=0.6)
+    legend_patches = [mpatches.Patch(color=CLASS_COLORS[c], label=c) for c in CLASS_NAMES]
+    ax.legend(handles=legend_patches, fontsize=8, loc="upper left")
+    fig.tight_layout()
+    fig.savefig(os.path.join(summary_dir, "patch_acc_by_experiment_dist.png"), dpi=100)
+    plt.close(fig)
+
+    # ── 10. overall_stats.txt ─────────────────────────────────────────────────
     n_p = len(patch_df)
     c_p = int(patch_df["correct"].sum())
     n_i = len(image_df)
@@ -394,7 +490,7 @@ def save_summary(
 # ── process one (model × split) combination ───────────────────────────────────
 
 def process_split(
-    model: torch.nn.Module,
+    model: Optional[torch.nn.Module],
     df: pd.DataFrame,
     split: str,
     model_type: str,
@@ -402,10 +498,30 @@ def process_split(
     grid: List[Tuple[int, int]],
     photos_dir: str,
     out_dir: str,
+    force: bool = False,
 ) -> None:
     split_dir = os.path.join(out_dir, model_type, split)
     annotated_base = os.path.join(split_dir, "annotated")
     summary_dir = os.path.join(split_dir, "summary")
+    patch_csv = os.path.join(split_dir, "patch_results.csv")
+    image_csv = os.path.join(split_dir, "image_voting_results.csv")
+
+    # ── Resume path: CSVs already exist and --force not set ──────────────────
+    if not force and os.path.exists(patch_csv) and os.path.exists(image_csv):
+        print(f"  Cached results found — loading CSVs, regenerating summaries only.")
+        print(f"  (pass --force to re-run inference and rebuild annotated images)")
+        patch_df = pd.read_csv(patch_csv)
+        image_df = pd.read_csv(image_csv)
+        os.makedirs(summary_dir, exist_ok=True)
+        save_summary(patch_df, image_df, summary_dir, model_type, split)
+        return
+
+    # ── Full inference path ───────────────────────────────────────────────────
+    if model is None:
+        raise RuntimeError(
+            f"model is None but inference is required for {model_type}/{split}. "
+            "This is a bug — please report it."
+        )
     for cls in CLASS_NAMES:
         os.makedirs(os.path.join(annotated_base, cls), exist_ok=True)
     os.makedirs(summary_dir, exist_ok=True)
@@ -489,8 +605,8 @@ def process_split(
 
     patch_df = pd.DataFrame(patch_rows)
     image_df = pd.DataFrame(image_rows)
-    patch_df.to_csv(os.path.join(split_dir, "patch_results.csv"), index=False)
-    image_df.to_csv(os.path.join(split_dir, "image_voting_results.csv"), index=False)
+    patch_df.to_csv(patch_csv, index=False)
+    image_df.to_csv(image_csv, index=False)
     print(f"  CSVs → {split_dir}")
 
     save_summary(patch_df, image_df, summary_dir, model_type, split)
@@ -548,6 +664,11 @@ def main() -> None:
                         help="Patch grid columns (default 5)")
     parser.add_argument("--n-rows", type=int, default=4,
                         help="Patch grid rows (default 4)")
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Re-run inference even if patch_results.csv already exists "
+             "(default: load cached CSVs and regenerate summaries only)",
+    )
     args = parser.parse_args()
 
     grid = make_grid(args.n_cols, args.n_rows)
@@ -595,19 +716,42 @@ def main() -> None:
     for mt in models_to_run:
         print("=" * 60)
         print(f"Model: {mt}")
-        model = load_patch_model(mt)
-        if model is None:
-            print("  best_model.pth disappeared — skipping")
-            continue
-        print("  Weights loaded (CPU, eval mode).")
 
-        for split in args.splits:
-            df = split_dfs.get(split)
-            if df is None or len(df) == 0:
-                print(f"  No images for split '{split}' — skipping")
+        # Determine which splits need inference vs. can resume from cache.
+        active_splits = [
+            s for s in args.splits
+            if split_dfs.get(s) is not None and len(split_dfs[s]) > 0
+        ]
+        needs_inference = args.force or any(
+            not (
+                os.path.exists(os.path.join(args.out_dir, mt, s, "patch_results.csv"))
+                and os.path.exists(os.path.join(args.out_dir, mt, s, "image_voting_results.csv"))
+            )
+            for s in active_splits
+        )
+
+        model: Optional[torch.nn.Module] = None
+        if needs_inference:
+            model = load_patch_model(mt)
+            if model is None:
+                print("  best_model.pth disappeared — cannot run inference, skipping")
                 continue
-            print(f"\n  Split '{split}': {len(df)} images × {len(grid)} patches "
-                  f"= {len(df)*len(grid)} forward passes")
+            print("  Weights loaded (CPU, eval mode).")
+        else:
+            print("  All splits cached — loading from CSVs, no inference needed.")
+
+        for split in active_splits:
+            df = split_dfs[split]
+            cached = (
+                not args.force
+                and os.path.exists(os.path.join(args.out_dir, mt, split, "patch_results.csv"))
+                and os.path.exists(os.path.join(args.out_dir, mt, split, "image_voting_results.csv"))
+            )
+            if not cached:
+                print(f"\n  Split '{split}': {len(df)} images × {len(grid)} patches "
+                      f"= {len(df)*len(grid)} forward passes")
+            else:
+                print(f"\n  Split '{split}': resuming from cache")
             process_split(
                 model=model,
                 df=df,
@@ -617,9 +761,11 @@ def main() -> None:
                 grid=grid,
                 photos_dir=args.photos,
                 out_dir=args.out_dir,
+                force=args.force,
             )
 
-        del model   # free memory before loading next model
+        if model is not None:
+            del model   # free memory before loading next model
 
     print("\nAll done.")
 
