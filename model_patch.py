@@ -1,9 +1,11 @@
 """
-model_patch.py — FibrinPatchCNN architecture for the patch_v0 pipeline.
+model_patch.py — FibrinPatchCNN architecture for the patch pipeline.
 
-Stride-2 all-convolutional CNN (~900K params) with a cosine classifier.
+Stride-2 all-convolutional CNN (~900K params).
 No MaxPool; spatial downsampling is done by stride-2 convolutions.
-NormalizedLinear imported from model.py — not redefined here.
+Supports two classifier heads controlled by head_type:
+  "cosine" — NormalizedLinear, outputs cosine similarities in [-1, 1]
+  "ce"     — standard Linear, outputs logits for cross-entropy loss
 
 Architecture:
     Input: (N, 1, 200, 200)
@@ -23,8 +25,7 @@ Architecture:
     Conv4:   Conv(128→256, k=3, p=1) → BN → ReLU       → (N, 256, 25, 25)
 
     AdaptiveAvgPool2d(1, 1) → Flatten → (N, 256)
-    Linear(256→128) → ReLU → Dropout(0.5) → NormalizedLinear(128→num_classes)
-    Output: (N, num_classes) cosine similarities in [-1, 1]
+    Linear(256→128) → ReLU → Dropout → <head>
 
 Receptive field in 200-px patch space: 59 px = 590 px in original image space.
 """
@@ -53,15 +54,27 @@ def _make_block(in_ch: int, out_ch: int) -> nn.Sequential:
 
 
 class FibrinPatchCNN(nn.Module):
-    """Patch-based CNN with stride-2 downsampling and cosine classifier.
+    """Patch-based CNN with stride-2 downsampling.
 
     Args:
         num_classes: Number of output classes (default 5).
         dropout_p:   Dropout probability in classifier head (default 0.5).
+        head_type:   "cosine" — NormalizedLinear classifier, cosine similarities
+                     in [-1, 1], trained with cosine loss (v0/v1 default).
+                     "ce"     — standard Linear classifier, logits, trained with
+                     cross-entropy loss (v2 series).
     """
 
-    def __init__(self, num_classes: int = 5, dropout_p: float = 0.5) -> None:
+    def __init__(
+        self,
+        num_classes: int = 5,
+        dropout_p: float = 0.5,
+        head_type: str = "cosine",
+    ) -> None:
         super().__init__()
+        if head_type not in ("cosine", "ce"):
+            raise ValueError(f"head_type must be 'cosine' or 'ce', got {head_type!r}")
+        self.head_type = head_type
         self.features = nn.Sequential(
             _make_block(1, 32),                              # → (N, 32, 100, 100)
             _make_block(32, 64),                             # → (N, 64, 50, 50)
@@ -69,11 +82,16 @@ class FibrinPatchCNN(nn.Module):
             _conv_bn_relu(128, 256, stride=1),               # → (N, 256, 25, 25)
             nn.AdaptiveAvgPool2d((1, 1)),                    # → (N, 256, 1, 1)
         )
+        final_layer = (
+            NormalizedLinear(128, num_classes)
+            if head_type == "cosine"
+            else nn.Linear(128, num_classes)
+        )
         self.classifier = nn.Sequential(
             nn.Linear(256, 128),
             nn.ReLU(inplace=True),
             nn.Dropout(p=dropout_p),
-            NormalizedLinear(128, num_classes),
+            final_layer,
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -82,16 +100,26 @@ class FibrinPatchCNN(nn.Module):
         return self.classifier(x)
 
     def get_embeddings(self, x: torch.Tensor) -> torch.Tensor:
-        """Return L2-normalized 128-dim embeddings (penultimate layer)."""
+        """Return 128-dim penultimate-layer features.
+
+        Cosine head: L2-normalized (unit sphere).
+        CE head: unnormalized activations after ReLU+Dropout.
+        """
         x = self.features(x)
         x = x.flatten(1)
         for layer in self.classifier[:-1]:   # Linear, ReLU, Dropout
             x = layer(x)
-        return F.normalize(x, dim=1)
+        return F.normalize(x, dim=1) if self.head_type == "cosine" else x
 
 
-def make_patch_model(num_classes: int = 5, dropout_p: float = 0.5) -> FibrinPatchCNN:
-    model = FibrinPatchCNN(num_classes=num_classes, dropout_p=dropout_p)
+def make_patch_model(
+    num_classes: int = 5,
+    dropout_p: float = 0.5,
+    head_type: str = "cosine",
+) -> FibrinPatchCNN:
+    model = FibrinPatchCNN(num_classes=num_classes, dropout_p=dropout_p,
+                           head_type=head_type)
     n_params = sum(p.numel() for p in model.parameters())
-    print(f"FibrinPatchCNN: {n_params:,} parameters, {num_classes} classes")
+    print(f"FibrinPatchCNN ({head_type} head): {n_params:,} parameters, "
+          f"{num_classes} classes")
     return model

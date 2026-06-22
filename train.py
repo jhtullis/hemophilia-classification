@@ -56,6 +56,7 @@ def main():
             "5class_hpc_v1a", "5class_hpc_v1b", "5class_hpc_v1c",
             "3class_scratch", "3class_finetune",
             "patch_v0", "patch_v1a", "patch_v1b", "patch_v1c",
+            "patch_v2a", "patch_v2b", "patch_v2c",
         ],
         help="Which model to train.",
     )
@@ -130,7 +131,8 @@ def main():
     elif args.model_type == "3class_finetune":
         from train_3class import main as _train
         _train(mode="finetune", **common)
-    elif args.model_type in ("patch_v0", "patch_v1a", "patch_v1b", "patch_v1c"):
+    elif args.model_type in ("patch_v0", "patch_v1a", "patch_v1b", "patch_v1c",
+                             "patch_v2a", "patch_v2b", "patch_v2c"):
         from train_patch import main as _train
         _train(**common, config_name=args.model_type)
     else:

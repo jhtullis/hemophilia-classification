@@ -101,4 +101,37 @@ CONFIGS = {
         "weight_decay": 5e-4,
         "dropout":      0.3,
     },
+
+    # ── patch v2: cross-entropy head, mirrors v1a/b/c hyperparameters ─────────
+    # head_type="ce" swaps NormalizedLinear for nn.Linear; loss = CrossEntropyLoss.
+
+    "patch_v2a": {
+        **_PATCH_V0_BASE,
+        "model_type": "patch_v2a",
+        "model_dir":  "models/patch_ce_v2a",
+        "head_type":  "ce",
+        "T_mult":     1.5,
+        "eta_min":    1e-4,
+        "dropout":    0.3,
+    },
+
+    "patch_v2b": {
+        **_PATCH_V0_BASE,
+        "model_type":   "patch_v2b",
+        "model_dir":    "models/patch_ce_v2b",
+        "head_type":    "ce",
+        "weight_decay": 3e-4,
+        "dropout":      0.3,
+    },
+
+    "patch_v2c": {
+        **_PATCH_V0_BASE,
+        "model_type":   "patch_v2c",
+        "model_dir":    "models/patch_ce_v2c",
+        "head_type":    "ce",
+        "T_mult":       1.5,
+        "eta_min":      1e-4,
+        "weight_decay": 5e-4,
+        "dropout":      0.3,
+    },
 }

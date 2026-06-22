@@ -245,6 +245,7 @@ def main(
     ETA_MIN      = cfg["eta_min"]
     DROPOUT_P    = cfg["dropout"]
     GRAD_CLIP    = cfg.get("grad_clip")
+    HEAD_TYPE    = cfg.get("head_type", "cosine")
     patches_per_image = cfg["patches_per_img"]
 
     if device is None:
@@ -291,7 +292,8 @@ def main(
     )
 
     # ── Model ────────────────────────────────────────────────────────────────
-    model = make_patch_model(num_classes=num_classes, dropout_p=DROPOUT_P).to(device)
+    model = make_patch_model(num_classes=num_classes, dropout_p=DROPOUT_P,
+                             head_type=HEAD_TYPE).to(device)
     scaler = torch.cuda.amp.GradScaler(enabled=gpu_cfg["use_scaler"])
     if gpu_cfg["use_compile"]:
         print("Compiling model with torch.compile …")
@@ -299,6 +301,8 @@ def main(
     augmentation = PatchAugmentation(patch_size=PATCH_SIZE).to(device)
     center_crop = K.CenterCrop(PATCH_SIZE)
     class_weights = _compute_class_weights(train_df, device)
+    if HEAD_TYPE == "ce":
+        criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
 
     # ── Optimizer + scheduler ────────────────────────────────────────────────
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -335,7 +339,8 @@ def main(
         "scheduler_eta_min": ETA_MIN,
         "dropout_p": DROPOUT_P,
         "grad_clip": GRAD_CLIP,
-        "loss": "CosineLoss",
+        "loss": "CrossEntropyLoss" if HEAD_TYPE == "ce" else "CosineLoss",
+        "head_type": HEAD_TYPE,
         "patch_size": PATCH_SIZE,
         "oversized": OVERSIZED,
         "patches_per_image": patches_per_image,
@@ -377,7 +382,8 @@ def main(
             with torch.autocast(device_type="cuda", dtype=gpu_cfg["amp_dtype"],
                                 enabled=gpu_cfg["amp_enabled"]):
                 sims = model(patches)
-                loss = cosine_loss(sims, labels, class_weights)
+                loss = (criterion(sims, labels) if HEAD_TYPE == "ce"
+                        else cosine_loss(sims, labels, class_weights))
             scaler.scale(loss).backward()
             if GRAD_CLIP is not None:
                 scaler.unscale_(optimizer)
@@ -405,7 +411,8 @@ def main(
                 labels = labels.to(device, non_blocking=True)
                 patches = center_crop(patches)   # 283→200, deterministic
                 sims = model(patches)
-                loss = cosine_loss(sims, labels, class_weights)
+                loss = (criterion(sims, labels) if HEAD_TYPE == "ce"
+                        else cosine_loss(sims, labels, class_weights))
                 val_loss_sum += loss.item() * len(labels)
                 val_correct += (sims.argmax(1) == labels).sum().item()
                 val_total += len(labels)
@@ -413,60 +420,79 @@ def main(
         val_loss = val_loss_sum / max(val_total, 1)
         val_acc = val_correct / max(val_total, 1)
 
-        # Cosine metrics: training loader with augmentation, val loader plain
-        # Wrap loaders so compute_cosine_metrics receives 200×200 patches
-        class _AugLoader:
-            def __init__(self, raw): self._raw = raw
-            def __iter__(self):
-                for p, l in self._raw:
-                    yield augmentation(p.to(device)).cpu(), l
-        class _CropLoader:
-            def __init__(self, raw): self._raw = raw
-            def __iter__(self):
-                for p, l in self._raw:
-                    yield center_crop(p), l
-
-        train_cos = compute_cosine_metrics(
-            model, _AugLoader(train_loader), device, max_samples=500
-        )
-        val_cos = compute_cosine_metrics(
-            model, _CropLoader(val_loader), device, max_samples=500
-        )
-
-        # Logging
         is_best = val_acc > best_val_acc
         if is_best:
             best_val_acc = val_acc
 
-        row = {
-            "epoch": epoch,
-            "train_cosine_loss": round(train_loss, 6),
-            "train_acc": round(train_acc, 6),
-            "val_cosine_loss": round(val_loss, 6),
-            "val_acc": round(val_acc, 6),
-            "train_mean_max_sim": round(train_cos["mean_max_sim"], 6),
-            "train_intra_cos": round(train_cos["intra_class_cos"], 6),
-            "train_inter_cos": round(train_cos["inter_class_cos"], 6),
-            "train_silhouette": round(train_cos["silhouette"], 6),
-            "val_mean_max_sim": round(val_cos["mean_max_sim"], 6),
-            "val_intra_cos": round(val_cos["intra_class_cos"], 6),
-            "val_inter_cos": round(val_cos["inter_class_cos"], 6),
-            "val_silhouette": round(val_cos["silhouette"], 6),
-            "lr": optimizer.param_groups[0]["lr"],
-            "model_type": config_name,
-            "wall_clock_time": datetime.now(timezone.utc).isoformat(),
-        }
+        lr_now = optimizer.param_groups[0]["lr"]
+
+        if HEAD_TYPE == "cosine":
+            # Embedding-geometry metrics — wrap loaders to deliver 200×200 patches
+            class _AugLoader:
+                def __init__(self, raw): self._raw = raw
+                def __iter__(self):
+                    for p, l in self._raw:
+                        yield augmentation(p.to(device)).cpu(), l
+            class _CropLoader:
+                def __init__(self, raw): self._raw = raw
+                def __iter__(self):
+                    for p, l in self._raw:
+                        yield center_crop(p), l
+
+            train_cos = compute_cosine_metrics(
+                model, _AugLoader(train_loader), device, max_samples=500
+            )
+            val_cos = compute_cosine_metrics(
+                model, _CropLoader(val_loader), device, max_samples=500
+            )
+
+            row = {
+                "epoch": epoch,
+                "train_cosine_loss": round(train_loss, 6),
+                "train_acc": round(train_acc, 6),
+                "val_cosine_loss": round(val_loss, 6),
+                "val_acc": round(val_acc, 6),
+                "train_mean_max_sim": round(train_cos["mean_max_sim"], 6),
+                "train_intra_cos": round(train_cos["intra_class_cos"], 6),
+                "train_inter_cos": round(train_cos["inter_class_cos"], 6),
+                "train_silhouette": round(train_cos["silhouette"], 6),
+                "val_mean_max_sim": round(val_cos["mean_max_sim"], 6),
+                "val_intra_cos": round(val_cos["intra_class_cos"], 6),
+                "val_inter_cos": round(val_cos["inter_class_cos"], 6),
+                "val_silhouette": round(val_cos["silhouette"], 6),
+                "lr": lr_now,
+                "model_type": config_name,
+                "wall_clock_time": datetime.now(timezone.utc).isoformat(),
+            }
+            print(
+                f"Epoch {epoch:5d} | "
+                f"train cosine_loss={train_loss:.4f} acc={train_acc:.3f} | "
+                f"val cosine_loss={val_loss:.4f} acc={val_acc:.3f} | "
+                f"sil(tr={train_cos['silhouette']:.3f} va={val_cos['silhouette']:.3f}) | "
+                f"lr={lr_now:.2e}"
+                + (" ← best" if is_best else "")
+            )
+        else:  # HEAD_TYPE == "ce"
+            row = {
+                "epoch": epoch,
+                "train_ce_loss": round(train_loss, 6),
+                "train_acc": round(train_acc, 6),
+                "val_ce_loss": round(val_loss, 6),
+                "val_acc": round(val_acc, 6),
+                "lr": lr_now,
+                "model_type": config_name,
+                "wall_clock_time": datetime.now(timezone.utc).isoformat(),
+            }
+            print(
+                f"Epoch {epoch:5d} | "
+                f"train ce_loss={train_loss:.4f} acc={train_acc:.3f} | "
+                f"val ce_loss={val_loss:.4f} acc={val_acc:.3f} | "
+                f"lr={lr_now:.2e}"
+                + (" ← best" if is_best else "")
+            )
+
         log_epoch(model_dir, row)
         history.append({k: v for k, v in row.items() if k != "wall_clock_time"})
-
-        print(
-            f"Epoch {epoch:5d} | "
-            f"train cosine_loss={train_loss:.4f} acc={train_acc:.3f} | "
-            f"val cosine_loss={val_loss:.4f} acc={val_acc:.3f} | "
-            f"sil(tr={train_cos['silhouette']:.3f} va={val_cos['silhouette']:.3f}) | "
-            f"lr={optimizer.param_groups[0]['lr']:.2e}"
-            + (" ← best" if is_best else "")
-        )
 
         # Checkpointing
         state = {

@@ -57,6 +57,9 @@ MODEL_REGISTRY: Dict[str, Tuple[str, int, dict]] = {
     "patch_v1a":            (os.path.join(_DIR, "models", "patch_5class_v1a"),      5, CLASS_MAP),
     "patch_v1b":            (os.path.join(_DIR, "models", "patch_5class_v1b"),      5, CLASS_MAP),
     "patch_v1c":            (os.path.join(_DIR, "models", "patch_5class_v1c"),      5, CLASS_MAP),
+    "patch_v2a":            (os.path.join(_DIR, "models", "patch_ce_v2a"),           5, CLASS_MAP),
+    "patch_v2b":            (os.path.join(_DIR, "models", "patch_ce_v2b"),           5, CLASS_MAP),
+    "patch_v2c":            (os.path.join(_DIR, "models", "patch_ce_v2c"),           5, CLASS_MAP),
 }
 
 # ---------------------------------------------------------------------------
@@ -101,7 +104,8 @@ def load_model_from_registry(
                                 "Train the model first.")
     if "patch" in model_type:
         from model_patch import FibrinPatchCNN
-        model = FibrinPatchCNN(num_classes=num_classes)
+        head_type = "ce" if "v2" in model_type else "cosine"
+        model = FibrinPatchCNN(num_classes=num_classes, head_type=head_type)
         sd = torch.load(model_path, map_location=device, weights_only=True)
         model.load_state_dict(sd)
         model.to(device).eval()
