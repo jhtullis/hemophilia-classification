@@ -311,7 +311,7 @@ def main(
     )
 
     # ── Checkpoint resume ────────────────────────────────────────────────────
-    ckpt = load_latest_checkpoint(model_dir) if resume else None
+    ckpt = load_latest_checkpoint(model_dir, map_location=device) if resume else None
     if ckpt is not None:
         sd = ckpt["model_state_dict"]
         if any(k.startswith("_orig_mod.") for k in sd):

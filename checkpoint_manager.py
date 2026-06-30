@@ -164,17 +164,23 @@ def save_checkpoint(
         torch.save(state["model_state_dict"], best_path)
 
 
-def load_latest_checkpoint(model_dir: str) -> dict | None:
+def load_latest_checkpoint(model_dir: str, map_location=None) -> dict | None:
     """Load checkpoints/latest.pth if it exists.
 
     Returns the checkpoint dict or None if no checkpoint is found.
     Prints a status line in either case.
+
+    Args:
+        map_location: Passed to torch.load. Pass the training device so that
+                      CUDA checkpoints load correctly even when CUDA fails to
+                      initialise on the node (e.g. Error 802 / is_available=False).
+                      Defaults to None (preserves torch.load default behaviour).
     """
     latest_path = os.path.join(model_dir, "checkpoints", "latest.pth")
     if not os.path.exists(latest_path):
         print("Starting from scratch.")
         return None
-    ckpt = torch.load(latest_path, weights_only=False)
+    ckpt = torch.load(latest_path, weights_only=False, map_location=map_location)
     print(f"Resuming from epoch {ckpt['epoch']}.")
     return ckpt
 
