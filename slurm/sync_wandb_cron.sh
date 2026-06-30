@@ -22,7 +22,12 @@ fi
 echo "$(date): Syncing wandb runs..." >> "$LOG"
 COUNT=0
 while IFS= read -r -d '' dir; do
-    if "$WANDB" sync "$dir" --no-mark-synced >> "$LOG" 2>&1; then
+    # No --no-mark-synced: let wandb mark each directory after upload so it is
+    # not re-uploaded on the next cron tick.  Re-uploading old job directories
+    # can cause the wandb server to reset the run history and discard continuation
+    # data from later jobs.  Use sync_wandb.sh (--no-mark-synced) to force a
+    # manual re-sync when needed.
+    if "$WANDB" sync "$dir" >> "$LOG" 2>&1; then
         echo "  Synced: $dir" >> "$LOG"
         COUNT=$((COUNT + 1))
     fi
