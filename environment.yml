@@ -19,3 +19,4 @@ dependencies:
   - torchaudio
   - wandb
   - kornia
+  - tqdm

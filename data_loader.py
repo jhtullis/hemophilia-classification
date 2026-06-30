@@ -60,6 +60,33 @@ def load_metadata(engine) -> pd.DataFrame:
     return df
 
 
+def load_metadata_csv(csv_path: str) -> pd.DataFrame:
+    """Load image metadata from img-metadata.csv.
+
+    Covers all 7400 images: 1000 exploratory (endpoint_10, idx 0-999) and
+    6400 grid (endpoint_64, idx 1000-7399, 8x8 spatial grid per experiment).
+
+    Returns:
+        DataFrame with columns:
+          idx, Experiment, Exp_Type, Slide_Type, Img_Name,
+          img_type, img_number, img_xpos, img_ypos
+        idx is derived from img_name (e.g. "0042.JPG" -> 42).
+        img_type: "endpoint_10" (exploratory) or "endpoint_64" (grid).
+        img_xpos, img_ypos: NaN for endpoint_10; 0.0-7.0 for endpoint_64.
+    """
+    df = pd.read_csv(csv_path)
+    df = df.rename(columns={
+        "experiment": "Experiment",
+        "exp_type":   "Exp_Type",
+        "slide_type": "Slide_Type",
+        "img_name":   "Img_Name",
+    })
+    df["idx"] = df["Img_Name"].str.replace(".JPG", "", regex=False).astype(int)
+    col_order = ["idx", "Experiment", "Exp_Type", "Slide_Type", "Img_Name",
+                 "img_type", "img_number", "img_xpos", "img_ypos"]
+    return df[col_order].reset_index(drop=True)
+
+
 # ---------------------------------------------------------------------------
 # Train / validation split
 # ---------------------------------------------------------------------------
