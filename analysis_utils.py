@@ -60,6 +60,10 @@ MODEL_REGISTRY: Dict[str, Tuple[str, int, dict]] = {
     "patch_v2a":            (os.path.join(_DIR, "models", "patch_ce_v2a"),           5, CLASS_MAP),
     "patch_v2b":            (os.path.join(_DIR, "models", "patch_ce_v2b"),           5, CLASS_MAP),
     "patch_v2c":            (os.path.join(_DIR, "models", "patch_ce_v2c"),           5, CLASS_MAP),
+    "mpatch_v0_a":          (os.path.join(_DIR, "models", "mpatch_v0_a"),            5, CLASS_MAP),
+    "mpatch_v0_b":          (os.path.join(_DIR, "models", "mpatch_v0_b"),            5, CLASS_MAP),
+    "mpatch_v0_c":          (os.path.join(_DIR, "models", "mpatch_v0_c"),            5, CLASS_MAP),
+    "mpatch_v0_d":          (os.path.join(_DIR, "models", "mpatch_v0_d"),            5, CLASS_MAP),
 }
 
 # ---------------------------------------------------------------------------
@@ -104,7 +108,9 @@ def load_model_from_registry(
                                 "Train the model first.")
     if "patch" in model_type:
         from model_patch import FibrinPatchCNN
-        head_type = "ce" if "v2" in model_type else "cosine"
+        from configs.training_configs import CONFIGS as _TRAIN_CONFIGS
+        _cfg = _TRAIN_CONFIGS.get(model_type, {})
+        head_type = _cfg.get("head_type", "ce" if "v2" in model_type else "cosine")
         model = FibrinPatchCNN(num_classes=num_classes, head_type=head_type)
         sd = torch.load(model_path, map_location=device, weights_only=True)
         model.load_state_dict(sd)

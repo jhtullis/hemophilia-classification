@@ -134,4 +134,66 @@ CONFIGS = {
         "weight_decay": 5e-4,
         "dropout":      0.3,
     },
+
+    # ── masked-patch v0: mask-guided sampling, replicates v1a/v2a hyperparams ─
+    # Shared mask params (intensity mask, min_fg=0.03, patch_size=200).
+    # patches_per_img inherited from _PATCH_V0_BASE but unused by MaskedPatchDataset.
+
+    "mpatch_v0_a": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v0_a",
+        "model_dir":            "models/mpatch_v0_a",
+        "T_mult":               1.5,
+        "eta_min":              1e-4,
+        "dropout":              0.3,
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         False,
+    },
+
+    "mpatch_v0_b": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v0_b",
+        "model_dir":            "models/mpatch_v0_b",
+        "T_mult":               1.5,
+        "eta_min":              1e-4,
+        "dropout":              0.3,
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         True,
+    },
+
+    "mpatch_v0_c": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v0_c",
+        "model_dir":            "models/mpatch_v0_c",
+        "head_type":            "ce",
+        "T_mult":               1.5,
+        "eta_min":              1e-4,
+        "dropout":              0.3,
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         False,
+    },
+
+    "mpatch_v0_d": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v0_d",
+        "model_dir":            "models/mpatch_v0_d",
+        "head_type":            "ce",
+        "T_mult":               1.5,
+        "eta_min":              1e-4,
+        "dropout":              0.3,
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         True,
+    },
 }

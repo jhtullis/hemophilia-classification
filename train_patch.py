@@ -272,16 +272,46 @@ def main(
     train_df, val_df, _ = get_or_create_split(model_dir, db_path)
     preprocessor = make_preprocessor()
 
-    train_ds = FibrinPatchDataset(
-        train_df, photo_dir, preprocessor,
-        patches_per_image=patches_per_image, preload=preload,
-    )
-    val_ds = FibrinPatchDataset(
-        val_df, photo_dir, preprocessor,
-        patches_per_image=patches_per_image, preload=preload,
-    )
+    is_masked = config_name.startswith("mpatch_")
 
-    train_sampler = make_patch_sampler(train_ds)
+    if is_masked:
+        from masked_patch_dataset import MaskedPatchDataset
+        _MASK_DIR       = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                       cfg["mask_dir"])
+        _MASK_VERSION   = cfg["mask_version"]
+        _PC_VERSION     = cfg["patch_center_version"]
+        _INCLUDE_GRID   = cfg.get("include_grid", False)
+        _CSV_PATH       = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                       "data", "img-metadata.csv")
+
+        train_ds = MaskedPatchDataset(
+            train_df, photo_dir, preprocessor,
+            mask_dir=_MASK_DIR,
+            mask_version=_MASK_VERSION,
+            patch_center_version=_PC_VERSION,
+            include_grid=_INCLUDE_GRID,
+            csv_path=_CSV_PATH,
+            preload=preload,
+        )
+        val_ds = MaskedPatchDataset(
+            val_df, photo_dir, preprocessor,
+            mask_dir=_MASK_DIR,
+            mask_version=_MASK_VERSION,
+            patch_center_version=_PC_VERSION,
+            include_grid=False,
+            preload=preload,
+        )
+        train_sampler = train_ds.make_sampler()
+    else:
+        train_ds = FibrinPatchDataset(
+            train_df, photo_dir, preprocessor,
+            patches_per_image=patches_per_image, preload=preload,
+        )
+        val_ds = FibrinPatchDataset(
+            val_df, photo_dir, preprocessor,
+            patches_per_image=patches_per_image, preload=preload,
+        )
+        train_sampler = make_patch_sampler(train_ds)
     train_loader = DataLoader(
         train_ds, batch_size=batch_size, sampler=train_sampler,
         num_workers=num_workers, pin_memory=True, persistent_workers=(num_workers > 0),
@@ -346,7 +376,7 @@ def main(
         "head_type": HEAD_TYPE,
         "patch_size": PATCH_SIZE,
         "oversized": OVERSIZED,
-        "patches_per_image": patches_per_image,
+        "patches_per_image": train_ds._total_patches if is_masked else patches_per_image,
         "num_classes": num_classes,
         "max_epochs": max_epochs,
         "epochs_per_job": epochs_per_job,
@@ -354,6 +384,17 @@ def main(
         "amp_dtype":   str(gpu_cfg["amp_dtype"]),
         "variant": config_name,
     }
+    if is_masked:
+        config.update({
+            "dataset":              "masked_patch",
+            "mask_version":         _MASK_VERSION,
+            "patch_center_version": _PC_VERSION,
+            "mask_min_fg":          cfg.get("mask_min_fg", 0.03),
+            "include_grid":         _INCLUDE_GRID,
+            "coverage_multiplier":  train_ds.coverage_multiplier,
+            "uniform_fraction":     train_ds.uniform_fraction,
+            "n_train_images":       len(train_ds._valid_row_positions),
+        })
     init_wandb(
         config=config,
         model_type=config_name,
