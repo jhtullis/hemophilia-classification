@@ -284,6 +284,12 @@ def main(
         _CSV_PATH       = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                        "data", "img-metadata.csv")
 
+        _UNIFORM_FRAC     = cfg.get("uniform_fraction",     0.20)
+        _VAL_UNIFORM_FRAC = cfg.get("val_uniform_fraction", 1.0)
+        # Default val=1.0 gives equal patch weight per image (comparable across ablations).
+        # mpatch_v0_a–d set val_uniform_fraction=0.20 explicitly to preserve the behavior
+        # they started training with before this default was introduced.
+
         train_ds = MaskedPatchDataset(
             train_df, photo_dir, preprocessor,
             mask_dir=_MASK_DIR,
@@ -292,6 +298,7 @@ def main(
             include_grid=_INCLUDE_GRID,
             csv_path=_CSV_PATH,
             preload=preload,
+            uniform_fraction=_UNIFORM_FRAC,
         )
         val_ds = MaskedPatchDataset(
             val_df, photo_dir, preprocessor,
@@ -300,6 +307,7 @@ def main(
             patch_center_version=_PC_VERSION,
             include_grid=False,
             preload=preload,
+            uniform_fraction=_VAL_UNIFORM_FRAC,
         )
         train_sampler = train_ds.make_sampler()
     else:
@@ -391,9 +399,10 @@ def main(
             "patch_center_version": _PC_VERSION,
             "mask_min_fg":          cfg.get("mask_min_fg", 0.03),
             "include_grid":         _INCLUDE_GRID,
-            "coverage_multiplier":  train_ds.coverage_multiplier,
-            "uniform_fraction":     train_ds.uniform_fraction,
-            "n_train_images":       len(train_ds._valid_row_positions),
+            "coverage_multiplier":       train_ds.coverage_multiplier,
+            "train_uniform_fraction":    train_ds.uniform_fraction,
+            "val_uniform_fraction":      val_ds.uniform_fraction,   # 0.20 for a-d, 1.0 for e+
+            "n_train_images":            len(train_ds._valid_row_positions),
         })
     init_wandb(
         config=config,

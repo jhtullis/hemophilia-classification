@@ -9,3 +9,7 @@ sbatch slurm/train_mpatch_v0_a.sh
 sbatch slurm/train_mpatch_v0_b.sh
 sbatch slurm/train_mpatch_v0_c.sh
 sbatch slurm/train_mpatch_v0_d.sh
+sbatch slurm/train_mpatch_v0_e.sh
+sbatch slurm/train_mpatch_v0_f.sh
+sbatch slurm/train_mpatch_v0_g.sh
+sbatch slurm/train_mpatch_v0_h.sh

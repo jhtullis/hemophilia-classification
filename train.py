@@ -58,6 +58,7 @@ def main():
             "patch_v0", "patch_v1a", "patch_v1b", "patch_v1c",
             "patch_v2a", "patch_v2b", "patch_v2c",
             "mpatch_v0_a", "mpatch_v0_b", "mpatch_v0_c", "mpatch_v0_d",
+            "mpatch_v0_e", "mpatch_v0_f", "mpatch_v0_g", "mpatch_v0_h",
         ],
         help="Which model to train.",
     )
@@ -136,6 +137,7 @@ def main():
         "patch_v0", "patch_v1a", "patch_v1b", "patch_v1c",
         "patch_v2a", "patch_v2b", "patch_v2c",
         "mpatch_v0_a", "mpatch_v0_b", "mpatch_v0_c", "mpatch_v0_d",
+        "mpatch_v0_e", "mpatch_v0_f", "mpatch_v0_g", "mpatch_v0_h",
     ):
         from train_patch import main as _train
         _train(**common, config_name=args.model_type)

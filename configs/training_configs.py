@@ -138,6 +138,11 @@ CONFIGS = {
     # ── masked-patch v0: mask-guided sampling, replicates v1a/v2a hyperparams ─
     # Shared mask params (intensity mask, min_fg=0.03, patch_size=200).
     # patches_per_img inherited from _PATCH_V0_BASE but unused by MaskedPatchDataset.
+    #
+    # NOTE (mpatch_v0_a through d): these models were trained before val_uniform_fraction
+    # was fixed at 1.0. Their validation curves used uniform_fraction=0.20 for val,
+    # so val patch counts were content-weighted rather than equal per image. Do not
+    # compare their val accuracy directly against e-h without accounting for this.
 
     "mpatch_v0_a": {
         **_PATCH_V0_BASE,
@@ -151,6 +156,7 @@ CONFIGS = {
         "patch_center_version": "p200_circle_v_intensity",
         "mask_min_fg":          0.03,
         "include_grid":         False,
+        "val_uniform_fraction": 0.20,   # legacy: training started before val was fixed at 1.0
     },
 
     "mpatch_v0_b": {
@@ -165,6 +171,7 @@ CONFIGS = {
         "patch_center_version": "p200_circle_v_intensity",
         "mask_min_fg":          0.03,
         "include_grid":         True,
+        "val_uniform_fraction": 0.20,   # legacy: training started before val was fixed at 1.0
     },
 
     "mpatch_v0_c": {
@@ -180,6 +187,7 @@ CONFIGS = {
         "patch_center_version": "p200_circle_v_intensity",
         "mask_min_fg":          0.03,
         "include_grid":         False,
+        "val_uniform_fraction": 0.20,   # legacy: training started before val was fixed at 1.0
     },
 
     "mpatch_v0_d": {
@@ -195,5 +203,73 @@ CONFIGS = {
         "patch_center_version": "p200_circle_v_intensity",
         "mask_min_fg":          0.03,
         "include_grid":         True,
+        "val_uniform_fraction": 0.20,   # legacy: training started before val was fixed at 1.0
+    },
+
+    # ── mpatch_v0_e/f: ablate uniform_fraction (baseline = 0.20 in a–d) ─────
+    # Both use CE head + exploratory+grid, identical to mpatch_v0_d otherwise.
+
+    "mpatch_v0_e": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v0_e",
+        "model_dir":            "models/mpatch_v0_e",
+        "head_type":            "ce",
+        "T_mult":               1.5,
+        "eta_min":              1e-4,
+        "dropout":              0.3,
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         True,
+        "uniform_fraction":     0.10,
+    },
+
+    "mpatch_v0_f": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v0_f",
+        "model_dir":            "models/mpatch_v0_f",
+        "head_type":            "ce",
+        "T_mult":               1.5,
+        "eta_min":              1e-4,
+        "dropout":              0.3,
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         True,
+        "uniform_fraction":     0.00,
+    },
+
+    "mpatch_v0_g": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v0_g",
+        "model_dir":            "models/mpatch_v0_g",
+        "head_type":            "ce",
+        "T_mult":               1.5,
+        "eta_min":              1e-4,
+        "dropout":              0.3,
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         True,
+        "uniform_fraction":     0.05,
+    },
+
+    "mpatch_v0_h": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v0_h",
+        "model_dir":            "models/mpatch_v0_h",
+        "head_type":            "ce",
+        "T_mult":               1.5,
+        "eta_min":              1e-4,
+        "dropout":              0.3,
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         True,
+        "uniform_fraction":     0.01,
     },
 }
