@@ -3,7 +3,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=48G
-#SBATCH --gpus=1
+#SBATCH --partition=cs,cs2,cssp1,dw,dwmatrix,eng,m13h,msg
+#SBATCH --gres=gpu:1
 #SBATCH --time=12:00:00
 #SBATCH --output=slurm/logs/fibrin_mpatch_v0_g_%j.out
 #SBATCH --error=slurm/logs/fibrin_mpatch_v0_g_%j.err
