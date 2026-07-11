@@ -332,7 +332,7 @@ def main(
     # ── Model ────────────────────────────────────────────────────────────────
     model = make_patch_model(num_classes=num_classes, dropout_p=DROPOUT_P,
                              head_type=HEAD_TYPE).to(device)
-    scaler = torch.cuda.amp.GradScaler(enabled=gpu_cfg["use_scaler"])
+    scaler = torch.amp.GradScaler('cuda', enabled=gpu_cfg["use_scaler"])
     if gpu_cfg["use_compile"]:
         print("Compiling model with torch.compile …")
         model = torch.compile(model)

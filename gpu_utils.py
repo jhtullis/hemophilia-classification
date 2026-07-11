@@ -7,7 +7,7 @@ def get_gpu_config(device: torch.device, default_batch_size: int) -> dict:
     SM version mapping:
         6.x  — Pascal  (P100):        no Tensor Cores; AMP saves memory only
         7.x  — Volta   (V100):        Tensor Cores; fp16 + GradScaler
-        8.x  — Ampere  (A100, L40S):  Tensor Cores; bf16 + GradScaler + compile
+        8.x  — Ampere  (A100, L40S):  Tensor Cores; bf16 + compile (needs module load cuda/12.8.1)
         9.x  — Hopper  (H100, H200):  bf16, no GradScaler, compile
         10.x — Blackwell (B200+):     bf16, no GradScaler, compile
     """
@@ -42,7 +42,7 @@ def get_gpu_config(device: torch.device, default_batch_size: int) -> dict:
             "amp_dtype":   torch.bfloat16,
             "use_scaler":  False,   # bf16 on Ampere doesn't need GradScaler
             "batch_size":  64,
-            "use_compile": True,
+            "use_compile": True,    # requires `module load cuda/12.8.1` in Slurm script (e-h)
         }
     elif sm >= 7:      # Volta (V100)
         return {
