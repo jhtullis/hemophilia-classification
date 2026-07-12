@@ -272,4 +272,26 @@ CONFIGS = {
         "include_grid":         True,
         "uniform_fraction":     0.01,
     },
+
+    # ── mpatch_v0_i: compile test ─────────────────────────────────────────────
+    # Replicates mpatch_v0_d (CE head, exploratory+grid, uniform_fraction=0.20)
+    # with force_compile=True to verify torch.compile works on the cluster.
+    # Uses val_uniform_fraction=1.0 (current default). Needs module load cuda/12.8.1
+    # and cuda-cudart-dev in the conda env (or CONDA_NO_PLUGINS=true conda install
+    # -c nvidia cuda-cudart-dev).
+    "mpatch_v0_i": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v0_i",
+        "model_dir":            "models/mpatch_v0_i",
+        "head_type":            "ce",
+        "T_mult":               1.5,
+        "eta_min":              1e-4,
+        "dropout":              0.3,
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         True,
+        "force_compile":        True,
+    },
 }

@@ -264,6 +264,8 @@ def main(
 
     from gpu_utils import get_gpu_config
     gpu_cfg = get_gpu_config(device, default_batch_size=cfg["batch_size"])
+    if cfg.get("force_compile", False):
+        gpu_cfg["use_compile"] = True
     batch_size = gpu_cfg["batch_size"]
     print(f"AMP: {gpu_cfg['amp_enabled']}  dtype: {gpu_cfg['amp_dtype']}  "
           f"batch_size: {batch_size}  compile: {gpu_cfg['use_compile']}")

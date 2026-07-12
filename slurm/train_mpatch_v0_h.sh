@@ -16,7 +16,6 @@ PROJECT_DIR="${SLURM_SUBMIT_DIR:-$(pwd)}"
 trap 'echo "Wall time approaching — resubmitting..."; sbatch "${PROJECT_DIR}/slurm/train_mpatch_v0_h.sh"; exit 0' USR1
 
 module load miniforge3
-module load cuda/12.8.1   # required for torch.compile / Triton header compilation
 conda activate fibrin
 
 export WANDB_MODE=offline
