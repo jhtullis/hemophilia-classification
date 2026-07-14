@@ -293,5 +293,6 @@ CONFIGS = {
         "mask_min_fg":          0.03,
         "include_grid":         True,
         "force_compile":        True,
+        "compile_backend":      "cudagraphs",
     },
 }

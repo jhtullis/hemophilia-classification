@@ -336,8 +336,9 @@ def main(
                              head_type=HEAD_TYPE).to(device)
     scaler = torch.amp.GradScaler('cuda', enabled=gpu_cfg["use_scaler"])
     if gpu_cfg["use_compile"]:
-        print("Compiling model with torch.compile …")
-        model = torch.compile(model)
+        _backend = cfg.get("compile_backend", "inductor")
+        print(f"Compiling model with torch.compile (backend={_backend}) …")
+        model = torch.compile(model, backend=_backend)
     augmentation = PatchAugmentation(patch_size=PATCH_SIZE).to(device)
     center_crop = K.CenterCrop(PATCH_SIZE)
     class_weights = _compute_class_weights(train_df, device)
