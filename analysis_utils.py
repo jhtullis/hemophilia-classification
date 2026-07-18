@@ -70,6 +70,7 @@ MODEL_REGISTRY: Dict[str, Tuple[str, int, dict]] = {
     "mpatch_v0_h":          (os.path.join(_DIR, "models", "mpatch_v0_h"),            5, CLASS_MAP),
     "mpatch_v0_i":          (os.path.join(_DIR, "models", "mpatch_v0_i"),            5, CLASS_MAP),
     "mpatch_v0_f1a":        (os.path.join(_DIR, "models", "mpatch_v0_f1a"),          5, CLASS_MAP),
+    "mpatch_v1_full_a":     (os.path.join(_DIR, "models", "mpatch_v1_full_a"),       5, CLASS_MAP),
 }
 
 # ---------------------------------------------------------------------------
@@ -113,12 +114,18 @@ def load_model_from_registry(
         raise FileNotFoundError(f"No trained model at {model_path}. "
                                 "Train the model first.")
     if "patch" in model_type:
-        from model_patch import FibrinPatchCNN
         from configs.training_configs import CONFIGS as _TRAIN_CONFIGS
         _cfg = _TRAIN_CONFIGS.get(model_type, {})
         head_type = _cfg.get("head_type", "ce" if "v2" in model_type else "cosine")
-        model = FibrinPatchCNN(num_classes=num_classes, head_type=head_type)
+        if model_type.startswith("mpatch_v1"):
+            from model_patch_full import FibrinPatchCNNFull
+            model = FibrinPatchCNNFull(num_classes=num_classes, head_type=head_type)
+        else:
+            from model_patch import FibrinPatchCNN
+            model = FibrinPatchCNN(num_classes=num_classes, head_type=head_type)
         sd = torch.load(model_path, map_location=device, weights_only=True)
+        if any(k.startswith("_orig_mod.") for k in sd):
+            sd = {k[len("_orig_mod."):]: v for k, v in sd.items()}
         model.load_state_dict(sd)
         model.to(device).eval()
     elif "hpc" in model_type:

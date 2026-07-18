@@ -61,6 +61,7 @@ def main():
             "mpatch_v0_e", "mpatch_v0_f", "mpatch_v0_g", "mpatch_v0_h",
             "mpatch_v0_i",
             "mpatch_v0_f1a",
+            "mpatch_v1_full_a",
         ],
         help="Which model to train.",
     )
@@ -142,6 +143,7 @@ def main():
         "mpatch_v0_e", "mpatch_v0_f", "mpatch_v0_g", "mpatch_v0_h",
         "mpatch_v0_i",
         "mpatch_v0_f1a",
+        "mpatch_v1_full_a",
     ):
         from train_patch import main as _train
         _train(**common, config_name=args.model_type)

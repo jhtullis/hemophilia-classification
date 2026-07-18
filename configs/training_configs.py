@@ -294,6 +294,31 @@ CONFIGS = {
         "pretrain_model_dir":   "models/mpatch_v0_f",
     },
 
+    # ── mpatch_v1_full: full-resolution patch pipeline ───────────────────────
+    # Extracts 2000×2000 patches from 6000×4000 JPEGs (no min-pool).
+    # Center masks reused from p200_circle_v_intensity (upscaled 10× on the fly).
+    # Run on H200 partitions (eng, m13h, mgh); batch_size=512 → ~56 GB peak.
+
+    "mpatch_v1_full_a": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v1_full_a",
+        "model_dir":            "models/mpatch_v1_full_a",
+        "lr":                   1e-3,
+        "weight_decay":         1e-3,
+        "T_0":                  100,
+        "T_mult":               1.5,
+        "eta_min":              1e-4,
+        "dropout":              0.3,
+        "batch_size":           512,
+        "head_type":            "ce",
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         False,
+        "uniform_fraction":     0.00,
+    },
+
     # ── mpatch_v0_i: compile test ─────────────────────────────────────────────
     # Replicates mpatch_v0_d (CE head, exploratory+grid, uniform_fraction=0.20)
     # with force_compile=True to verify torch.compile works on the cluster.

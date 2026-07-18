@@ -272,11 +272,40 @@ def main(
 
     # ── Data ────────────────────────────────────────────────────────────────
     train_df, val_df, _ = get_or_create_split(model_dir, db_path)
-    preprocessor = make_preprocessor()
 
-    is_masked = config_name.startswith("mpatch_")
+    is_full_res = config_name.startswith("mpatch_v1")
+    is_masked   = config_name.startswith("mpatch_") and not is_full_res
 
-    if is_masked:
+    if is_full_res:
+        from masked_patch_dataset_full import MaskedFullPatchDataset
+        from model_patch_full import PATCH_SIZE_FULL, OVERSIZED_FULL
+        from preprocessing_full import make_preprocessor_full
+
+        preprocessor = make_preprocessor_full()
+        _MASK_DIR   = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   cfg["mask_dir"])
+        _MASK_VERSION = cfg["mask_version"]
+        _PC_VERSION   = cfg["patch_center_version"]
+        _UNIFORM_FRAC = cfg.get("uniform_fraction", 0.00)
+
+        train_ds = MaskedFullPatchDataset(
+            train_df, photo_dir, preprocessor,
+            mask_dir=_MASK_DIR,
+            mask_version=_MASK_VERSION,
+            patch_center_version=_PC_VERSION,
+            uniform_fraction=_UNIFORM_FRAC,
+        )
+        val_ds = MaskedFullPatchDataset(
+            val_df, photo_dir, preprocessor,
+            mask_dir=_MASK_DIR,
+            mask_version=_MASK_VERSION,
+            patch_center_version=_PC_VERSION,
+            uniform_fraction=1.0,   # equal patches per image for fair val comparison
+        )
+        train_sampler = train_ds.make_sampler()
+
+    elif is_masked:
+        preprocessor = make_preprocessor()
         from masked_patch_dataset import MaskedPatchDataset
         _MASK_DIR       = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                        cfg["mask_dir"])
@@ -313,6 +342,7 @@ def main(
         )
         train_sampler = train_ds.make_sampler()
     else:
+        preprocessor = make_preprocessor()
         train_ds = FibrinPatchDataset(
             train_df, photo_dir, preprocessor,
             patches_per_image=patches_per_image, preload=preload,
@@ -332,15 +362,24 @@ def main(
     )
 
     # ── Model ────────────────────────────────────────────────────────────────
-    model = make_patch_model(num_classes=num_classes, dropout_p=DROPOUT_P,
-                             head_type=HEAD_TYPE).to(device)
+    if is_full_res:
+        from model_patch_full import FibrinPatchCNNFull, PATCH_SIZE_FULL, OVERSIZED_FULL
+        _PATCH_SZ  = PATCH_SIZE_FULL
+        _OVERSIZED = OVERSIZED_FULL
+        model = FibrinPatchCNNFull(num_classes=num_classes, dropout_p=DROPOUT_P,
+                                   head_type=HEAD_TYPE).to(device)
+    else:
+        _PATCH_SZ  = PATCH_SIZE
+        _OVERSIZED = OVERSIZED
+        model = make_patch_model(num_classes=num_classes, dropout_p=DROPOUT_P,
+                                 head_type=HEAD_TYPE).to(device)
     scaler = torch.amp.GradScaler('cuda', enabled=gpu_cfg["use_scaler"])
     if gpu_cfg["use_compile"]:
         _backend = cfg.get("compile_backend", "inductor")
         print(f"Compiling model with torch.compile (backend={_backend}) …")
         model = torch.compile(model, backend=_backend)
-    augmentation = PatchAugmentation(patch_size=PATCH_SIZE).to(device)
-    center_crop = K.CenterCrop(PATCH_SIZE)
+    augmentation = PatchAugmentation(patch_size=_PATCH_SZ).to(device)
+    center_crop = K.CenterCrop(_PATCH_SZ)
     class_weights = _compute_class_weights(train_df, device)
     if HEAD_TYPE == "ce":
         criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
@@ -395,9 +434,9 @@ def main(
         "grad_clip": GRAD_CLIP,
         "loss": "CrossEntropyLoss" if HEAD_TYPE == "ce" else "CosineLoss",
         "head_type": HEAD_TYPE,
-        "patch_size": PATCH_SIZE,
-        "oversized": OVERSIZED,
-        "patches_per_image": train_ds._total_patches if is_masked else patches_per_image,
+        "patch_size": _PATCH_SZ,
+        "oversized": _OVERSIZED,
+        "patches_per_image": train_ds._total_patches if (is_masked or is_full_res) else patches_per_image,
         "num_classes": num_classes,
         "max_epochs": max_epochs,
         "epochs_per_job": epochs_per_job,
@@ -405,7 +444,18 @@ def main(
         "amp_dtype":   str(gpu_cfg["amp_dtype"]),
         "variant": config_name,
     }
-    if is_masked:
+    if is_full_res:
+        config.update({
+            "dataset":                   "masked_full_patch",
+            "mask_version":              _MASK_VERSION,
+            "patch_center_version":      _PC_VERSION,
+            "mask_min_fg":               cfg.get("mask_min_fg", 0.03),
+            "coverage_multiplier":       train_ds.coverage_multiplier,
+            "train_uniform_fraction":    train_ds.uniform_fraction,
+            "val_uniform_fraction":      val_ds.uniform_fraction,
+            "n_train_images":            len(train_ds._valid_row_positions),
+        })
+    elif is_masked:
         config.update({
             "dataset":              "masked_patch",
             "mask_version":         _MASK_VERSION,

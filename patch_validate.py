@@ -72,7 +72,9 @@ def load_patch_model(model_type: str) -> Optional[torch.nn.Module]:
     if not os.path.exists(model_path):
         return None
     from model_patch import FibrinPatchCNN
-    head_type = "ce" if "v2" in model_type else "cosine"
+    from configs.training_configs import CONFIGS as _TRAIN_CONFIGS
+    _cfg = _TRAIN_CONFIGS.get(model_type, {})
+    head_type = _cfg.get("head_type", "ce" if "v2" in model_type else "cosine")
     model = FibrinPatchCNN(num_classes=num_classes, head_type=head_type)
     sd = torch.load(model_path, map_location=DEVICE, weights_only=True)
     # Strip _orig_mod. prefix produced by torch.compile if present
