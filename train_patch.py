@@ -369,6 +369,16 @@ def main(
         best_val_acc = 0.0
         history = []
         wandb_run_id = None
+        pretrain_dir = cfg.get("pretrain_model_dir")
+        if pretrain_dir:
+            pretrain_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                        pretrain_dir)
+            weights_path = os.path.join(pretrain_dir, "best_model.pth")
+            sd = torch.load(weights_path, map_location=device, weights_only=True)
+            if any(k.startswith("_orig_mod.") for k in sd):
+                sd = {k[len("_orig_mod."):]: v for k, v in sd.items()}
+            model.load_state_dict(sd)
+            print(f"Loaded pretrain weights from {weights_path}")
 
     # ── Wandb ────────────────────────────────────────────────────────────────
     config = {
