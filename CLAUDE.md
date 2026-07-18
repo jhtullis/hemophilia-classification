@@ -23,41 +23,90 @@ Class map (integer labels): AC3=0, F08D=1, F09D=2, F11D=3, NC1=4
 
 ## File Structure
 ```
-preprocessing.py             Grayscale + 10× min-pool (original pipeline)
+# Core pipeline — full-image
+preprocessing.py             Grayscale + 10× min-pool
 preprocessing_frangi.py      Multi-channel Frangi pipeline (7-ch, 4× mean-pool)
-augmentation.py              4-fold flip augmentations
-data_loader.py               DB access, Dataset, DataLoaders, split helpers
+augmentation.py              4-fold flip augmentations (full-image)
+data_loader.py               DB access, FibrinDataset, split helpers
 model.py                     FibrinCNN architecture (~455K params)
-train.py                     Unified training entry point (dispatches to below)
-train_5class.py              5-class training loop
-train_3class.py              3-class hemophilia CNN (scratch or finetune)
+
+# Core pipeline — patch-based
+augmentation_patch.py        Kornia GPU augmentation module for patches
+patch_dataset.py             FibrinPatchDataset (uniform random sampling)
+masked_patch_dataset.py      MaskedPatchDataset (content-aware sampling)
+model_patch.py               FibrinPatchCNN architecture (~900K params)
+compute_masks.py             Precompute foreground masks → masks/<version>/
+compute_patch_centers.py     Precompute valid patch centers → masks/patch_centers/
+gpu_utils.py                 GPU detection + AMP/compile config per SM version
+lr_schedulers.py             LR scheduler utilities
+checkpoint_manager.py        Checkpoint save/load logic
+configs/training_configs.py  All model hyperparameter configs
+
+# Training
+train.py                     Unified entry point (dispatches by --model-type)
+train_5class.py              5-class full-image training loop
+train_5class_hpc.py          HPC-optimized 5-class (cosine, W&B, checkpointing)
+train_3class.py              3-class hemophilia (scratch or finetune)
+train_patch.py               Patch + masked-patch unified training loop
+
+# Evaluation
 evaluate.py                  Per-class precision/recall/F1, confusion matrix
-run_analysis.py              Orchestrates all 11 analysis steps in order
+evaluate_cosine.py           Evaluation for cosine-head full-image models
+evaluate_patch.py            Patch cosine soft-vote grid inference
+
+# Analysis scripts
+run_analysis.py              Orchestrates all 11 analysis steps
 hemophilia_analysis.py       ROC curves, annotated images, multi-model compare
+gradcam.py                   Grad-CAM class saliency maps + full overlay batch
 visualize_weights.py         CNN kernel heatmaps + activation maps
+activation_analysis.py       CNN activation map spatial analysis
+misclassification_report.py  Per-image misclassification analysis
+preprocessing_comparison.py  Preprocessing method robustness comparison
 plot_training_curves.py      Train/val loss and accuracy curves
 analysis_utils.py            Shared inference DataFrame + model registry
-misclassification_report.py  Per-image misclassification analysis
-activation_analysis.py       CNN activation map spatial analysis
-preprocessing_comparison.py  Preprocessing method robustness comparison
-gradcam.py                   Grad-CAM class saliency maps + full overlay batch
+replay_wandb.py              Replay offline W&B runs to cloud
+
+# Diagnostics / utilities
+tune_patch_threshold.py      Sweep min_fg thresholds for mask tuning
+visualize_patch_centers.py   Visualize patch-center validity maps
+inspect_masks.py             Inspect foreground mask quality
+patch_validate.py            Validate patch sampling distribution
+generate_figs.py / figs_best_class.py  Publication figures
+
+# Tests
 test_preprocessing.py        Visual + structural tests (original pipeline)
 test_preprocessing_frangi.py Tests + visual outputs for Frangi pipeline
 test_augmentation.py         Visual + property tests
 test_data_loader.py          DB, split, Dataset unit tests
-AGENT_EXPORT.md              Context primer for new Claude Code instances
+test_patch_pipeline.py       Patch dataset, model, augmentation, split tests
+test_lr_scheduler.py         LR scheduler tests
+
+# Slurm
+slurm/setup_env.sh           One-time conda env creation on HPC
+slurm/submit_all.sh          Submit all standard training jobs
+slurm/submit_mpatch_v0.sh    Submit all mpatch_v0 jobs
+slurm/train_*.sh             Per-model self-resubmitting job scripts
+slurm/sync_wandb.sh          Sync offline W&B runs
+slurm/logs/                  Job stdout/stderr
+
+# Data and outputs
 environment.yml              Conda environment
-data/photos/                 Raw images
+data/photos/                 Raw images (0000–0999.JPG)
 data/endpoint10.db           SQLite labels
-models/5class/               5-class model artifacts
-  best_model.pth               Saved weights
-  train_record.json            Canonical train/validation split
-  training_history.json        Per-epoch loss and accuracy
-  analysis/                    Analysis outputs (misclassification/, activation/,
-                                 preprocessing/, gradcam/, roc/, annotated_test/)
+data/img-metadata.csv        Per-image metadata CSV
+data/exp-metadata.csv        Per-experiment metadata CSV
+masks/v_intensity/           Precomputed foreground masks
+masks/patch_centers/         Precomputed patch-center validity maps
+models/5class/               5-class full-image model artifacts
+models/5class_hpc_v0/        Cosine 5-class HPC model
+models/5class_hpc_v1a-c/     Cosine 5-class variant models
 models/3class_hemo/          3-class from-scratch model artifacts
 models/3class_hemo_finetune/ 3-class fine-tuned model artifacts
-test_output/                 Visual outputs from preprocessing and augmentation tests
+models/patch_5class_v1a-c/   Patch cosine models
+models/patch_ce_v2a-c/       Patch CE models
+models/mpatch_v0_a-i/        Masked-patch models
+test_output/                 Visual outputs from preprocessing/augmentation tests
+agent/                       Historical planning documents (patch_cnn_plan.md, etc.)
 ```
 
 ## CNN Architecture
@@ -157,9 +206,29 @@ python visualize_weights.py --model-dir models/5class        # kernel + activati
 Preprocessing sensitivity (5-class model, validation set):
 green=63.2% > luminance=61.7% > lab_l=57.7% > hsv_v=57.2% > hsv_s=30.9%
 
+## Mask Pipeline
+- **Foreground masks** (`compute_masks.py`): precomputed per image, stored in `masks/<version>/`
+  - `v_intensity`: light-background intensity threshold (primary)
+  - `v_frangi`, `v_entropy`: alternative mask methods
+- **Patch-center validity** (`compute_patch_centers.py`): inscribed-circle rule — center valid if ≥`min_fg` fraction of circle (radius=100 px) is foreground. Stored in `masks/patch_centers/<version>/`.
+  - `p200_circle_v_intensity`: 200 px diameter, v_intensity mask, min_fg=0.03 (3%)
+- **MaskedPatchDataset** (`masked_patch_dataset.py`): uses validity maps to blend content-weighted and uniform-per-image patch allocation.
+  - `uniform_fraction`: fraction of patches drawn uniformly per image (default 0.20 in a–d; ablated in e–h)
+  - `val_uniform_fraction`: always 1.0 (new default) for fair cross-model comparison; a–d used 0.20 (legacy)
+
+## GPU Training (HPC)
+- Cluster: BYU HPC — V100 (SM 7.x), A100 (SM 8.x), H100/H200 (SM 9.x)
+- `gpu_utils.get_gpu_config()`: returns AMP dtype, GradScaler flag, batch size, compile flag per GPU
+  - SM 7.x (V100): fp16, GradScaler, no compile
+  - SM 8.x (A100): bf16, no GradScaler, no compile (Triton needs `cuda-cudart-dev` in conda to enable)
+  - SM 9.x (H100/H200): bf16, no GradScaler, no compile (same)
+- `force_compile: True` in a model config overrides gpu_utils and calls `torch.compile(model, backend=compile_backend)`
+- `mpatch_v0_i` uses `compile_backend: "cudagraphs"` as a Triton-free compile test
+
 ## Known Issues / Fixes Applied
 - `ReduceLROnPlateau(verbose=True)` removed — argument dropped in PyTorch 2.4+
 - `np.trapz` → `np.trapezoid` — renamed in NumPy 2.0
 - No sklearn dependency; metrics computed from scratch in `evaluate.py`
-- Machine has no GPU; training runs on CPU only
+- `torch.cuda.amp.GradScaler` → `torch.amp.GradScaler('cuda', ...)` — deprecated in PyTorch 2.7+
 - BatchNorm eval mode: always call `model.eval()` before inference; `predict_all()` in `evaluate.py` does this defensively
+- `torch.compile` disabled by default on all GPU types — Triton requires `cuda.h` from `cuda-cudart-dev` conda package which is not installed; install with `CONDA_NO_PLUGINS=true conda install -c nvidia cuda-cudart-dev` then re-enable in `gpu_utils.py`

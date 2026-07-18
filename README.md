@@ -1,18 +1,28 @@
 # Fibrin Clot CNN Classification
 
-Classify microscopy images of fibrin clots across five blood phenotypes using a convolutional neural network in PyTorch.
+Classify brightfield microscopy images of fibrin clots across five blood phenotypes using PyTorch CNNs. This branch (`dev-hpc0`) adds GPU-accelerated patch-based training on the BYU HPC cluster alongside the original full-image pipeline.
+
+---
+
+## Scientific Background
+
+Fibrin clots form when blood plasma coagulates in response to injury. The resulting fibrin network — its fiber density, thickness, branching, and pore size — varies measurably between individuals depending on their coagulation factor profile. In hemophilia, key coagulation factors are absent or deficient, producing clots with a distinctively altered microstructure visible under brightfield microscopy.
+
+This project tests whether a CNN can learn to discriminate these structural differences from images alone, with particular interest in distinguishing between the three hemophilia subtypes (A, B, C).
 
 ---
 
 ## Classes
 
-| Label | Phenotype | Count |
+| Label | Condition | Count |
 |-------|-----------|-------|
-| NC1   | Normal control | 200 |
-| AC3   | Prolonged clotting time | 200 |
-| F08D  | Factor VIII deficient | 200 |
-| F09D  | Factor IX deficient | 200 |
-| F11D  | Factor XI deficient | 200 |
+| NC1   | Normal plasma control | 200 |
+| AC3   | Prolonged clotting time (non-hemophilic control) | 200 |
+| F08D  | Factor VIII deficient — Hemophilia A | 200 |
+| F09D  | Factor IX deficient — Hemophilia B | 200 |
+| F11D  | Factor XI deficient — Hemophilia C | 200 |
+
+Integer label map (hardcoded): `AC3=0, F08D=1, F09D=2, F11D=3, NC1=4`
 
 ---
 
@@ -23,193 +33,288 @@ conda env create -f environment.yml
 conda activate fibrin
 ```
 
+Key dependencies: PyTorch, Kornia, OpenCV, SQLAlchemy, pandas, NumPy, scikit-image, wandb, pytest.
+
 ---
 
 ## Data
 
-- **Images**: `data/photos/0000.JPG` – `0999.JPG` (6000 × 4000 px JPEG, landscape)
+- **Images**: `data/photos/0000.JPG` – `0999.JPG` (6000×4000 px JPEG, landscape)
 - **Labels**: `data/endpoint10.db` — SQLite, table `Images_Endpoint_10`
-  - Filename integer = `rowid - 1` (row 1 → `0000.JPG`)
+  - `rowid - 1` = filename integer (row 1 → `0000.JPG`)
   - Key columns: `Experiment`, `Exp_Type` (class), `Slide_Type` (A/B)
-- **50 distinct experiments** (10 per class); all images from one experiment stay in the same partition
-- Source: Cordner, R., & Tullis, J. H. (2026). Brightfield Images of Factor Deficient Plasma Clots [Data set]. Zenodo. [https://doi.org/10.5281/zenodo.19994554](https://doi.org/10.5281/zenodo.19994554)
+- **Metadata CSVs**: `data/img-metadata.csv` (per-image), `data/exp-metadata.csv` (per-experiment)
+- **50 distinct experiments** (10 per class); images from the same experiment are correlated and always kept in the same partition
+- Source: Cordner, R., & Tullis, J. H. (2026). Brightfield Images of Factor Deficient Plasma Clots. Zenodo. https://doi.org/10.5281/zenodo.19994554
 
 ---
 
-## Preprocessing Pipeline
+## Preprocessing
 
-Every image is normalized to landscape orientation, then:
+### Full-image pipeline (`preprocessing.py`)
+1. Grayscale via CIE LAB L-channel (`lab_l`, default)
+2. **10× min-pool**: 6000×4000 → 600×400. Min-pool preserves dark fibers on a light background.
+3. Normalize to float32 [0, 1]; add channel dim → tensor `(1, 400, 600)`
 
-1. **Grayscale** — L channel from CIE LAB color space (`lab_l`, default). Alternatives (`luminance`, `hsv_v`, `hsv_s`, `green`) are compared in `test_preprocessing.py`.
-2. **10× min-pool** — Reduces 6000×4000 → 600×400. Min-pool preserves thin dark fibers on a light background.
-3. **Normalize** — Scale uint8 to float32 in [0, 1]; add channel dim → tensor `(1, 400, 600)`.
+### Frangi multi-channel pipeline (`preprocessing_frangi.py`)
+4× mean-pool + Frangi filter at σ = 1, 2, 4, 6, 10, 20 → 7-channel tensor `(7, 1000, 1500)`.
 
-A second **Frangi multi-channel pipeline** (`preprocessing_frangi.py`) is also implemented: 4× mean-pool + 6 Frangi filter scales → 7-channel tensor `(7, 1000, 1500)`.
+### Foreground masks (`compute_masks.py`)
+Precompute per-image binary foreground masks using intensity, Frangi, and entropy methods. Stored in `masks/<version>/`. Used by the masked-patch pipeline to restrict patch sampling to fibrin-rich regions.
+
+### Patch-center validity maps (`compute_patch_centers.py`)
+For each image, determine which patch centers (200 px radius inscribed-circle rule) have ≥3% foreground coverage. Stored in `masks/patch_centers/<version>/`. Used by `MaskedPatchDataset`.
 
 ---
 
-## CNN Architecture
+## Architectures
 
+### FibrinCNN (`model.py`)
+Full-image model. Input: `(1, 400, 600)` grayscale.
 ```
-Input:  1 × 600 × 400  (grayscale, after 10× min-pool)
-
-Block 1: Conv2d(1→32,   5×5, pad=2) → BN → ReLU → MaxPool(2×2)  →  32 × 300 × 200
-Block 2: Conv2d(32→64,  5×5, pad=2) → BN → ReLU → MaxPool(2×2)  →  64 × 150 × 100
-Block 3: Conv2d(64→128, 3×3, pad=1) → BN → ReLU → MaxPool(2×2)  → 128 ×  75 ×  50
-Block 4: Conv2d(128→256,3×3, pad=1) → BN → ReLU → MaxPool(2×2)  → 256 ×  37 ×  25
-
-AdaptiveAvgPool2d(1,1) → 256
-Linear(256→128) → ReLU → Dropout(0.5) → Linear(128→num_classes)
+Block 1: Conv2d(1→32,  5×5) → BN → ReLU → MaxPool  →  32×300×200
+Block 2: Conv2d(32→64, 5×5) → BN → ReLU → MaxPool  →  64×150×100
+Block 3: Conv2d(64→128,3×3) → BN → ReLU → MaxPool  → 128×75×50
+Block 4: Conv2d(128→256,3×3)→ BN → ReLU → MaxPool  → 256×37×25
+AdaptiveAvgPool2d(1,1) → Linear(256→128) → ReLU → Dropout(0.5) → Linear(128→N)
 ```
+~455K parameters. Receptive field: 520 px in original image space.
 
-~455K parameters (5-class) / ~455K (3-class). Receptive field after Block 4: **520 px** in original image space (requirement: ≥300 px).
+### FibrinPatchCNN (`model_patch.py`)
+Patch-based model. Input: `(1, 200, 200)`.
+```
+Block 1: Conv3×3 → Conv3×3 → Conv3×3(stride=2) → BN/ReLU  →  32×100×100
+Block 2: Conv3×3 → Conv3×3 → Conv3×3(stride=2) → BN/ReLU  →  64×50×50
+Block 3: Conv3×3 → Conv3×3 → Conv3×3(stride=2) → BN/ReLU  → 128×25×25
+Conv4:   Conv3×3                                → BN/ReLU  → 256×25×25
+AdaptiveAvgPool2d(1,1) → Linear(256→128) → ReLU → Dropout → head
+```
+~900K parameters. Receptive field: 590 px in original image space.
 
----
-
-## Data Augmentation
-
-Training only. Each image generates 4 variants:
-
-| Variant | Transform |
-|---------|-----------|
-| 0 | Original |
-| 1 | Horizontal flip |
-| 2 | Vertical flip |
-| 3 | Both flips (180°) |
+Two head types (selected per config):
+- **Cosine head** (`NormalizedLinear`): outputs cosine similarities in [−1, 1]; trained with `CosineLoss`
+- **CE head** (`Linear`): standard cross-entropy logits
 
 ---
 
 ## Training
 
-Three model types are available via `train.py`:
+All training is dispatched through `train.py`:
 
 ```bash
-python train.py --model-type 5class             # 5-class model → models/5class/
-python train.py --model-type 3class_scratch     # 3-class from random init
-python train.py --model-type 3class_finetune    # fine-tune 5-class → 3-class
-python train.py --model-type 5class --preload   # cache images in RAM (faster on CPU)
-python train.py --model-type 5class --force-resplit  # regenerate train/val split
+python train.py --model-type <type> [--resume] [--preload] [--max-epochs N] [--epochs-per-job N]
 ```
 
-The 3-class models train on F08D, F09D, F11D only, reusing the same experiment-level split as the 5-class model. The fine-tune variant uses a two-phase schedule: head-only warmup (5 epochs), then full unfreeze (25 epochs).
+### Full-image models
 
-**Hyperparameters (5-class):**
+| Model type | Description |
+|---|---|
+| `5class` | FibrinCNN, 5 classes, ReduceLROnPlateau, 30 epochs |
+| `5class_hpc_baseline` | Same, saved to separate dir for HPC comparison |
+| `5class_hpc_v0` | FibrinCNNCosine, cosine head, CosineAnnealingWarmRestarts |
+| `5class_hpc_v1a/b/c` | Variants of cosine 5-class with tuned hyperparameters |
+| `3class_scratch` | FibrinCNN(3 classes) from random init (F08D/F09D/F11D only) |
+| `3class_finetune` | Fine-tune 5-class weights → 3-class head |
 
-| Parameter | Value |
-|-----------|-------|
-| `batch_size` | 16 |
-| `lr` | 1e-3 (Adam) |
-| `weight_decay` | 1e-4 |
-| `num_epochs` | 30 |
-| Scheduler | ReduceLROnPlateau (patience=5, factor=0.5) |
+### Standard patch models
 
-**Outputs** (per model directory):
-- `best_model.pth` — weights at highest validation accuracy
-- `train_record.json` — canonical train/validation split (never re-randomized)
-- `training_history.json` — per-epoch loss and accuracy
-- `training_log.txt` — full stdout log
+| Model type | Head | Grid | Notes |
+|---|---|---|---|
+| `patch_v0` | cosine | — | Baseline patch model |
+| `patch_v1a/b/c` | cosine | — | Ablation variants |
+| `patch_v2a/b/c` | CE | — | Cross-entropy head variants |
+
+### Masked-patch models (content-aware sampling)
+
+Patches are sampled preferentially from fibrin-rich image regions using precomputed validity maps. `uniform_fraction` controls the blend between content-weighted and uniform-per-image sampling. Validation always uses `uniform_fraction=1.0` (equal patches per image) for fair cross-model comparison.
+
+| Model | Head | Grid | `uniform_fraction` | Notes |
+|---|---|---|---|---|
+| `mpatch_v0_a` | cosine | no  | 0.20 | val uses 0.20 (legacy) |
+| `mpatch_v0_b` | cosine | yes | 0.20 | val uses 0.20 (legacy) |
+| `mpatch_v0_c` | CE     | no  | 0.20 | val uses 0.20 (legacy) |
+| `mpatch_v0_d` | CE     | yes | 0.20 | val uses 0.20 (legacy) |
+| `mpatch_v0_e` | CE     | yes | 0.10 | val uses 1.0 |
+| `mpatch_v0_f` | CE     | yes | 0.00 | val uses 1.0; fully content-weighted |
+| `mpatch_v0_g` | CE     | yes | 0.05 | val uses 1.0 |
+| `mpatch_v0_h` | CE     | yes | 0.01 | val uses 1.0 |
+| `mpatch_v0_i` | CE     | yes | 0.20 | compile test; `cudagraphs` backend |
+
+Grid models include both exploratory and grid-acquisition images during training.
+
+---
+
+## HPC / Slurm
+
+Training on BYU HPC cluster (V100, A100, H100, H200 nodes).
+
+```bash
+# Submit individual jobs
+sbatch slurm/train_mpatch_v0_e.sh
+
+# Submit multiple independently
+for m in e f g h; do sbatch slurm/train_mpatch_v0_${m}.sh; done
+
+# Monitor
+squeue -u $USER
+scancel <jobid>
+```
+
+Each script self-resubmits on wall-time (USR1 signal 5 min before limit) and on clean exit (epoch quota met, more epochs remain). Jobs are independent — each model trains on a single GPU.
+
+GPU optimization (`gpu_utils.py`): BF16 AMP on Ampere/Hopper, FP16+GradScaler on Volta, `cudnn.benchmark=True` on all CUDA GPUs.
+
+---
+
+## Weights & Biases
+
+W&B logging is on by default. Jobs run in offline mode on the cluster:
+
+```bash
+export WANDB_MODE=offline
+# After job completes, sync from login node:
+wandb sync models/<type>/wandb/run-*/
+# Or batch-sync:
+bash slurm/sync_wandb.sh
+```
+
+Run ID is stored in each checkpoint and restored on resume — W&B runs are continuous across Slurm job boundaries.
 
 ---
 
 ## Evaluation
 
 ```bash
+# Full-image models
 python evaluate.py --model-type 5class
 python evaluate.py --model-type 3class_finetune
+
+# Cosine full-image
+python evaluate_cosine.py --model-type 5class_hpc_v0
+
+# Patch models (val or test split)
+python evaluate_patch.py --model-type patch_v1a --split val
+python evaluate_patch.py --model-type mpatch_v0_e --split val
 ```
 
-Prints per-class precision, recall, F1, support, and the confusion matrix.
+### Trained model results (validation set)
+
+| Model | Val set | Accuracy | Notes |
+|---|---|---|---|
+| 5class | n=200 | 57.7% | F08D hardest; top confusion F08D→F09D |
+| 3class_finetune | n=120 | 70.8% | Fine-tuned from 5class; hemophilia classes only |
+| 3class_scratch | n=120 | 62.5% | From-scratch 3-class |
+
+Preprocessing sensitivity (5-class, val): green=63.2% > luminance=61.7% > lab_l=57.7% > hsv_v=57.2% > hsv_s=30.9%
 
 ---
 
-## Analysis Suite
-
-Run all 11 analysis steps in order with a single command:
+## Analysis Suite (full-image models)
 
 ```bash
 python run_analysis.py --model-type 5class
-python run_analysis.py --model-type 3class_finetune
 ```
 
-Steps (outputs go to `models/<type>/analysis/`):
-
-| Step | Script | Output |
-|------|--------|--------|
-| 1 | `evaluate.py` | Per-class metrics, confusion matrix |
-| 2 | `misclassification_report.py` | Per-image error analysis |
-| 3 | `activation_analysis.py` | Spatial activation maps |
-| 4 | `preprocessing_comparison.py` | Accuracy by grayscale method |
-| 5 | `gradcam.py` | Class representative + misclassified saliency maps |
-| 6 | `gradcam.py --all-overlays` | Full-resolution Grad-CAM overlay per test image |
-| 7 | `hemophilia_analysis.py --roc` | OVR ROC / AUC curves |
-| 8 | `hemophilia_analysis.py --annotate` | Annotated test image copies |
-| 9 | `visualize_weights.py` | Kernel heatmaps + activation maps |
-| 10 | `plot_training_curves.py` | Train/val loss and accuracy curves |
-| 11 | `hemophilia_analysis.py --compare` | Multi-model ROC overlay |
-
----
-
-## Tests
-
-```bash
-pytest -v -s
-```
-
-| Test file | What it checks |
-|-----------|---------------|
-| `test_preprocessing.py` | Grayscale methods, min-pool, visual PNGs → `test_output/` |
-| `test_preprocessing_frangi.py` | Frangi pipeline channels, visual PNGs → `test_output/` |
-| `test_augmentation.py` | All 4 flip variants, self-inverse property, shape preservation |
-| `test_data_loader.py` | 1000 rows, correct class counts (200 per class), no experiment overlap between splits |
+Runs 11 steps: metrics, misclassification, activation maps, preprocessing comparison, Grad-CAM, ROC curves, annotated images, weight visualization, training curves, multi-model comparison. Outputs to `models/<type>/analysis/`.
 
 ---
 
 ## File Structure
 
 ```
-preprocessing.py             Grayscale + 10× min-pool (original pipeline)
-preprocessing_frangi.py      Multi-channel Frangi pipeline (7-ch, 4× mean-pool)
-augmentation.py              4-fold flip augmentations
-data_loader.py               DB access, Dataset, balanced DataLoader, split helpers
-model.py                     FibrinCNN architecture
-train.py                     Unified training entry point
-train_5class.py              5-class training loop
-train_3class.py              3-class hemophilia training (scratch or finetune)
-evaluate.py                  Per-class metrics and confusion matrix
-run_analysis.py              Orchestrates all 11 analysis steps in order
+# Core pipeline
+preprocessing.py             Grayscale + 10× min-pool
+preprocessing_frangi.py      Multi-channel Frangi pipeline
+augmentation.py              4-fold flip augmentations (full-image)
+augmentation_patch.py        Kornia GPU augmentation for patches
+data_loader.py               DB access, FibrinDataset, split helpers
+model.py                     FibrinCNN (full-image)
+model_patch.py               FibrinPatchCNN (patch-based)
+patch_dataset.py             FibrinPatchDataset — uniform random sampling
+masked_patch_dataset.py      MaskedPatchDataset — content-aware sampling
+compute_masks.py             Precompute foreground masks
+compute_patch_centers.py     Precompute valid patch centers
+gpu_utils.py                 GPU detection + AMP/compile configuration
+lr_schedulers.py             LR scheduler utilities
+checkpoint_manager.py        Checkpoint save/load logic
+configs/training_configs.py  All model hyperparameter configs
+
+# Training entry points
+train.py                     Unified dispatcher (--model-type selects pipeline)
+train_5class.py              5-class full-image training loop
+train_5class_hpc.py          HPC-optimized 5-class (cosine head, W&B, checkpointing)
+train_3class.py              3-class hemophilia (scratch or finetune)
+train_patch.py               Patch and masked-patch training loop
+
+# Evaluation
+evaluate.py                  Per-class metrics, confusion matrix (full-image)
+evaluate_cosine.py           Evaluation for cosine-head full-image models
+evaluate_patch.py            Cosine soft-vote inference over patch grid
+
+# Analysis scripts
+run_analysis.py              Full 11-step analysis suite
 hemophilia_analysis.py       ROC curves, annotated images, multi-model compare
+gradcam.py                   Grad-CAM saliency maps
 visualize_weights.py         CNN kernel heatmaps + activation maps
+activation_analysis.py       Spatial activation statistics
+misclassification_report.py  Per-image error analysis
+preprocessing_comparison.py  Grayscale method robustness comparison
 plot_training_curves.py      Train/val loss and accuracy curves
-analysis_utils.py            Shared inference utilities and model registry
-misclassification_report.py  Per-image misclassification analysis
-activation_analysis.py       CNN activation map spatial analysis
-preprocessing_comparison.py  Preprocessing method robustness comparison
-gradcam.py                   Grad-CAM class saliency maps + full overlay batch
-test_preprocessing.py        Visual + structural tests (original pipeline)
-test_preprocessing_frangi.py Tests + visual outputs for Frangi pipeline
-test_augmentation.py         Visual + property tests
-test_data_loader.py          DB, split, and Dataset unit tests
-AGENT_EXPORT.md              Context primer for new Claude Code sessions
-environment.yml              Conda environment specification
-data/photos/                 6000×4000 JPEG images
+analysis_utils.py            Model registry + shared inference utilities
+replay_wandb.py              Replay offline W&B runs to cloud
+
+# Utilities / diagnostics
+tune_patch_threshold.py      Sweep min_fg thresholds for mask tuning
+visualize_patch_centers.py   Visualize valid patch center maps
+inspect_masks.py             Inspect foreground mask quality
+patch_validate.py            Validate patch sampling distribution
+generate_figs.py             Publication figure generation
+figs_best_class.py           Per-class best-image figures
+
+# Tests
+test_preprocessing.py        Grayscale methods, min-pool, visual outputs
+test_preprocessing_frangi.py Frangi pipeline tests
+test_augmentation.py         Flip augmentation tests
+test_data_loader.py          DB, split, Dataset unit tests
+test_patch_pipeline.py       Patch dataset, model, augmentation, split tests
+test_lr_scheduler.py         LR scheduler tests
+
+# Slurm
+slurm/setup_env.sh           One-time conda env creation on HPC
+slurm/submit_all.sh          Submit all standard training jobs
+slurm/submit_mpatch_v0.sh    Submit all mpatch_v0 jobs
+slurm/train_*.sh             Per-model job scripts (self-resubmitting)
+slurm/sync_wandb.sh          Sync offline W&B runs to cloud
+slurm/logs/                  Slurm stdout/stderr logs
+
+# Data and outputs
+data/photos/                 6000×4000 JPEG images (0000–0999.JPG)
 data/endpoint10.db           SQLite label database
-models/5class/               5-class model artifacts
-models/3class_hemo/          3-class from-scratch model artifacts
-models/3class_hemo_finetune/ 3-class fine-tuned model artifacts
-test_output/                 Visual outputs from preprocessing and augmentation tests
+data/img-metadata.csv        Per-image metadata
+data/exp-metadata.csv        Per-experiment metadata
+masks/v_intensity/           Precomputed foreground masks
+masks/patch_centers/         Precomputed patch-center validity maps
+models/5class/               Full-image 5-class model
+models/5class_hpc_v0/        Cosine full-image model
+models/patch_5class_v1a/     Patch cosine model (v1a)
+models/patch_ce_v2a/         Patch CE model (v2a)
+models/mpatch_v0_*/          Masked-patch models
+test_output/                 Visual outputs from preprocessing/augmentation tests
+agent/                       Historical planning documents
+old/                         Legacy evaluation outputs
 ```
 
 ---
 
-## Potential Improvements
+## Tests
 
-- **Transfer learning**: pre-trained ImageNet weights (grayscale → 3-channel duplication) could improve accuracy on this small dataset.
-- **Additional augmentation**: random brightness/contrast jitter or small rotations (if rotational symmetry holds beyond 0°/90°/180°/270°).
-- **Larger dataset**: more experimental replicates would be the highest-leverage improvement.
-- **Slide type as auxiliary signal**: `Slide_Type` (A/B) is a known covariate that could be incorporated as metadata.
+```bash
+pytest -v -s                          # all tests
+pytest test_patch_pipeline.py -v -s   # patch pipeline only
+```
 
 ---
 
 ## AI Use Note
 
-This repository was developed with extensive use of [Claude Code](https://claude.ai/code) (Anthropic). Claude Code wrote the code files and the majority of the documentation files contained in this repository. The author, Jason Henry Tullis, provided an initial specification file outlining the desired build, along with active review, correction, and modifications to the AI outputs during the development process.
+This repository was developed with extensive use of [Claude Code](https://claude.ai/code) (Anthropic). Claude Code wrote the code files and the majority of the documentation contained in this repository. The author, Jason Henry Tullis, provided the initial specification, along with active review, correction, and modification of AI outputs throughout the development process.
