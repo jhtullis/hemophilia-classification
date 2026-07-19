@@ -245,11 +245,14 @@ class MaskedFullPatchDataset(Dataset):
         cy_pad = cy + PAD_FULL
         cx_pad = cx + PAD_FULL
         half   = OVERSIZED_FULL // 2
+        # .clone() is critical: without it, the returned patch is a view that keeps the
+        # entire 241 MB padded tensor alive. With batch_size N, N views → N × 241 MB of
+        # padded tensors held simultaneously in the DataLoader assembly buffer (OOM).
         patch  = padded[
             :,
             cy_pad - half : cy_pad + half + 1,
             cx_pad - half : cx_pad + half + 1,
-        ]   # (1, OVERSIZED_FULL, OVERSIZED_FULL)
+        ].clone()   # (1, OVERSIZED_FULL, OVERSIZED_FULL) — 32 MB, padded freed
 
         return patch, label
 
