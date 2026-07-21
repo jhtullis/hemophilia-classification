@@ -341,6 +341,92 @@ CONFIGS = {
         "preload":              True,   # grayscale JPEG preload: ~15–30 GB CPU RAM
     },
 
+    # ── mpatch_v0 "lite" variants: ReduceLROnPlateau + GPU preloading ────────
+    # Named <parent>_lite. Training regime differs from the parent:
+    #   - lr = 2× parent max LR (1e-3 → 2e-3)
+    #   - ReduceLROnPlateau(mode='max', factor=0.95, patience=5) instead of cosine
+    #   - preload_device="cuda": unpadded (1,400,600) float32 tensors stored on GPU
+    #     → requires num_workers=0 in DataLoader (set automatically by train_patch.py)
+    #   - No partition constraint in Slurm scripts → runs on any available GPU
+    # Uniform fraction, include_grid, and head_type match each parent model.
+    # CRITICAL: include_grid=True uses split-filtered grid images only (see CLAUDE.md §CRITICAL).
+
+    "mpatch_v0e_lite": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v0e_lite",
+        "model_dir":            "models/mpatch_v0e_lite",
+        "lr":                   2e-3,
+        "head_type":            "ce",
+        "dropout":              0.3,
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         True,
+        "uniform_fraction":     0.10,
+        "scheduler_type":       "plateau",
+        "plateau_factor":       0.95,
+        "plateau_patience":     5,
+        "preload_device":       "cuda",
+    },
+
+    "mpatch_v0f_lite": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v0f_lite",
+        "model_dir":            "models/mpatch_v0f_lite",
+        "lr":                   2e-3,
+        "head_type":            "ce",
+        "dropout":              0.3,
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         True,
+        "uniform_fraction":     0.00,
+        "scheduler_type":       "plateau",
+        "plateau_factor":       0.95,
+        "plateau_patience":     5,
+        "preload_device":       "cuda",
+    },
+
+    "mpatch_v0g_lite": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v0g_lite",
+        "model_dir":            "models/mpatch_v0g_lite",
+        "lr":                   2e-3,
+        "head_type":            "ce",
+        "dropout":              0.3,
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         True,
+        "uniform_fraction":     0.05,
+        "scheduler_type":       "plateau",
+        "plateau_factor":       0.95,
+        "plateau_patience":     5,
+        "preload_device":       "cuda",
+    },
+
+    "mpatch_v0h_lite": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v0h_lite",
+        "model_dir":            "models/mpatch_v0h_lite",
+        "lr":                   2e-3,
+        "head_type":            "ce",
+        "dropout":              0.3,
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         True,
+        "uniform_fraction":     0.01,
+        "scheduler_type":       "plateau",
+        "plateau_factor":       0.95,
+        "plateau_patience":     5,
+        "preload_device":       "cuda",
+    },
+
     # ── mpatch_v0_i: compile test ─────────────────────────────────────────────
     # Replicates mpatch_v0_d (CE head, exploratory+grid, uniform_fraction=0.20)
     # with force_compile=True to verify torch.compile works on the cluster.

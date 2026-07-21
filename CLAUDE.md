@@ -1,5 +1,33 @@
 # CLAUDE.md — Fibrin Clot CNN Project Reference
 
+## !! CRITICAL: Train/Val/Test Split Integrity !!
+
+**NEVER add grid images (endpoint_64) to a dataset unconditionally.**
+Grid images MUST be filtered by the experiments already present in the target split:
+
+```python
+# CORRECT — filter to split's experiments before concat
+split_exps = set(df["Experiment"])
+grid_df = grid_all[
+    (grid_all["img_type"] == "endpoint_64") &
+    (grid_all["Experiment"].isin(split_exps))
+]
+self.df = pd.concat([df, grid_df]).reset_index(drop=True)
+
+# WRONG — adds val/test grid images to every dataset partition
+grid_df = grid_all[grid_all["img_type"] == "endpoint_64"]  # ← DATA BLEED
+self.df = pd.concat([df, grid_df]).reset_index(drop=True)
+```
+
+Every code path that appends grid images MUST include the `Experiment.isin(split_exps)` filter.
+This was violated in `masked_patch_dataset.py` and `masked_patch_dataset_full.py`, causing data
+bleed in models mpatch_v0_{b,d,e,f,g,h,i,f1a} — all required full retraining.
+
+The experiment-level split is created by `get_or_create_split` with `seed=99` and is
+deterministic — deleting a model directory causes the same split to be recreated.
+
+---
+
 ## Project Goal
 Classify 1000 microscopy images of fibrin clots across 5 phenotypes using a PyTorch CNN.
 
@@ -215,6 +243,9 @@ green=63.2% > luminance=61.7% > lab_l=57.7% > hsv_v=57.2% > hsv_s=30.9%
 - **MaskedPatchDataset** (`masked_patch_dataset.py`): uses validity maps to blend content-weighted and uniform-per-image patch allocation.
   - `uniform_fraction`: fraction of patches drawn uniformly per image (default 0.20 in a–d; ablated in e–h)
   - `val_uniform_fraction`: always 1.0 (new default) for fair cross-model comparison; a–d used 0.20 (legacy)
+  - `preload_device`: optional `torch.device` — preloads unpadded (400×600) float32 tensors onto GPU;
+    requires `num_workers=0` in DataLoader (workers are separate processes, cannot access CUDA tensors)
+  - **CRITICAL**: when `include_grid=True`, grid images are filtered to `split_exps` only (see warning above)
 
 ## GPU Training (HPC)
 - Cluster: BYU HPC — V100 (SM 7.x), A100 (SM 8.x), H100/H200 (SM 9.x)

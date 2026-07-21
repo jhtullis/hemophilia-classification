@@ -61,6 +61,7 @@ def main():
             "mpatch_v0_e", "mpatch_v0_f", "mpatch_v0_g", "mpatch_v0_h",
             "mpatch_v0_i",
             "mpatch_v0_f1a",
+            "mpatch_v0e_lite", "mpatch_v0f_lite", "mpatch_v0g_lite", "mpatch_v0h_lite",
             "mpatch_v1_full_a",
             "mpatch_v1_full_b",
         ],
@@ -144,6 +145,7 @@ def main():
         "mpatch_v0_e", "mpatch_v0_f", "mpatch_v0_g", "mpatch_v0_h",
         "mpatch_v0_i",
         "mpatch_v0_f1a",
+        "mpatch_v0e_lite", "mpatch_v0f_lite", "mpatch_v0g_lite", "mpatch_v0h_lite",
         "mpatch_v1_full_a",
         "mpatch_v1_full_b",
     ):

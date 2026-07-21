@@ -132,6 +132,7 @@ class MaskedPatchDataset(Dataset):
         coverage_multiplier: float = 2.0,
         uniform_fraction: float = 0.20,
         validate_classes: bool = True,
+        preload_device: Optional[torch.device] = None,
     ) -> None:
         self.photo_dir = photo_dir
         self.preprocessor = preprocessor
@@ -141,6 +142,7 @@ class MaskedPatchDataset(Dataset):
         self.gate_mode = gate_mode
         self.coverage_multiplier = coverage_multiplier
         self.uniform_fraction = uniform_fraction
+        self._preload_device = preload_device
 
         # Optionally extend with grid images, restricted to the same experiments
         # present in the passed split — prevents val/test grid images leaking into train.
@@ -253,11 +255,28 @@ class MaskedPatchDataset(Dataset):
               f"{self._total_patches} total patch slots "
               f"(mean {mean_patches:.1f} patches/image)")
 
-        # Preload tensors and center masks
+        # Preload tensors and center masks.
+        # preload_device != None: store unpadded (1,400,600) float32 on GPU; pad on-the-fly.
+        #   Requires num_workers=0 in DataLoader — CUDA tensors are not fork-safe.
+        #   Memory: ~0.96 MB/image unpadded vs ~1.22 MB padded — saves padding overhead
+        #   and keeps the preload footprint minimal for GPU VRAM.
+        # preload=True (CPU): store padded (1, 684, 884) float32 in CPU RAM (default).
         self._tensors: Optional[List[torch.Tensor]] = None
         self._center_masks: Optional[List[np.ndarray]] = None
 
-        if preload:
+        if preload_device is not None:
+            print(f"  GPU-preloading {n_valid_imgs} unpadded tensors to {preload_device}...")
+            self._tensors = []
+            for pos in self._valid_row_positions:
+                t = self._load_base_tensor(pos)   # (1, 400, 600) float32, CPU
+                self._tensors.append(t.to(preload_device, non_blocking=True))
+            print(f"  Preloading {n_valid_imgs} center masks (CPU)...")
+            self._center_masks = []
+            for pos in self._valid_row_positions:
+                idx = int(self.df.iloc[pos]["idx"])
+                self._center_masks.append(self._load_center_mask_arr(idx))
+            print("  GPU preload complete.")
+        elif preload:
             print(f"  Preloading {n_valid_imgs} tensors...")
             self._tensors = []
             for pos in self._valid_row_positions:
@@ -286,7 +305,10 @@ class MaskedPatchDataset(Dataset):
 
     def _get_padded_tensor(self, slot_idx: int) -> torch.Tensor:
         if self._tensors is not None:
-            return self._tensors[slot_idx]
+            if self._preload_device is not None:
+                # GPU-preloaded: tensors are unpadded; pad on the fly (runs on GPU)
+                return _pad_tensor(self._tensors[slot_idx], PAD)
+            return self._tensors[slot_idx]  # CPU-preloaded: already padded
         return _pad_tensor(self._load_base_tensor(self._valid_row_positions[slot_idx]), PAD)
 
     def _load_center_mask_arr(self, idx: int) -> np.ndarray:

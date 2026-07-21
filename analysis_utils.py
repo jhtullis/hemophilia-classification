@@ -70,6 +70,10 @@ MODEL_REGISTRY: Dict[str, Tuple[str, int, dict]] = {
     "mpatch_v0_h":          (os.path.join(_DIR, "models", "mpatch_v0_h"),            5, CLASS_MAP),
     "mpatch_v0_i":          (os.path.join(_DIR, "models", "mpatch_v0_i"),            5, CLASS_MAP),
     "mpatch_v0_f1a":        (os.path.join(_DIR, "models", "mpatch_v0_f1a"),          5, CLASS_MAP),
+    "mpatch_v0e_lite":      (os.path.join(_DIR, "models", "mpatch_v0e_lite"),         5, CLASS_MAP),
+    "mpatch_v0f_lite":      (os.path.join(_DIR, "models", "mpatch_v0f_lite"),         5, CLASS_MAP),
+    "mpatch_v0g_lite":      (os.path.join(_DIR, "models", "mpatch_v0g_lite"),         5, CLASS_MAP),
+    "mpatch_v0h_lite":      (os.path.join(_DIR, "models", "mpatch_v0h_lite"),         5, CLASS_MAP),
     "mpatch_v1_full_a":     (os.path.join(_DIR, "models", "mpatch_v1_full_a"),       5, CLASS_MAP),
     "mpatch_v1_full_b":     (os.path.join(_DIR, "models", "mpatch_v1_full_b"),       5, CLASS_MAP),
 }
