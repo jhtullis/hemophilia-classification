@@ -324,7 +324,7 @@ CONFIGS = {
         **_PATCH_V0_BASE,
         "model_type":           "mpatch_v1_full_b",
         "model_dir":            "models/mpatch_v1_full_b",
-        "lr":                   3e-3,   # ×3 sqrt scaling vs _a (include_grid ~9× more images → √9=3)
+        "lr":                   3e-3,   # ×3 sqrt scaling vs mpatch_v0 (batch size 64→512 → √8≈3)
         "weight_decay":         2.5e-3, # ×2.5 scaling vs _a (batch size increase)
         "T_0":                  100,
         "T_mult":               1.5,
