@@ -291,6 +291,8 @@ def main(
         _CSV_PATH     = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                      "data", "img-metadata.csv")
 
+        _PRELOAD = cfg.get("preload", False)
+
         train_ds = MaskedFullPatchDataset(
             train_df, photo_dir, preprocessor,
             mask_dir=_MASK_DIR,
@@ -299,6 +301,7 @@ def main(
             uniform_fraction=_UNIFORM_FRAC,
             include_grid=_INCLUDE_GRID,
             csv_path=_CSV_PATH if _INCLUDE_GRID else None,
+            preload=_PRELOAD,
         )
         val_ds = MaskedFullPatchDataset(
             val_df, photo_dir, preprocessor,
@@ -307,6 +310,7 @@ def main(
             patch_center_version=_PC_VERSION,
             uniform_fraction=1.0,   # equal patches per image for fair val comparison
             include_grid=False,     # val always uses primary images only
+            preload=_PRELOAD,
         )
         train_sampler = train_ds.make_sampler()
 
@@ -461,6 +465,7 @@ def main(
             "train_uniform_fraction":    train_ds.uniform_fraction,
             "val_uniform_fraction":      val_ds.uniform_fraction,
             "n_train_images":            len(train_ds._valid_row_positions),
+            "preload":                   _PRELOAD,
         })
     elif is_masked:
         config.update({
@@ -504,7 +509,7 @@ def main(
             patches = patches.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
 
-            patches = augmentation(patches)   # 283→200 with rotation + flips
+            patches = augmentation(patches)   # oversized → patch_size with rotation + flips
 
             optimizer.zero_grad()
             with torch.autocast(device_type="cuda", dtype=gpu_cfg["amp_dtype"],
@@ -537,7 +542,7 @@ def main(
             for patches, labels in val_loader:
                 patches = patches.to(device, non_blocking=True)
                 labels = labels.to(device, non_blocking=True)
-                patches = center_crop(patches)   # 283→200, deterministic
+                patches = center_crop(patches)   # oversized → patch_size, deterministic
                 sims = model(patches)
                 loss = (criterion(sims, labels) if HEAD_TYPE == "ce"
                         else cosine_loss(sims, labels, class_weights))

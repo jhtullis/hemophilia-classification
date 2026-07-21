@@ -59,7 +59,7 @@ class MaskedFullPatchDataset(Dataset):
       - Images are not min-pooled (preprocessor returns (1, 4000, 6000) tensors)
       - Patch size is PATCH_SIZE_FULL = 2000 (same physical area as 200 in 600×400)
       - Center masks are upscaled 10× on the fly from the existing 600×400 PNGs
-      - Preloading is not supported (images too large)
+      - Optional preloading: grayscale JPEG bytes stored in CPU RAM (preload=True)
 
     Args:
         df:                    Metadata DataFrame from patch_dataset.load_split_record.
@@ -89,6 +89,7 @@ class MaskedFullPatchDataset(Dataset):
         validate_classes: bool = True,
         include_grid: bool = False,
         csv_path: Optional[str] = None,
+        preload: bool = False,
     ) -> None:
         self.df = df.reset_index(drop=True)
 
@@ -194,16 +195,54 @@ class MaskedFullPatchDataset(Dataset):
             f"patch_size={PATCH_SIZE_FULL}"
         )
 
+        # Preload grayscale JPEG bytes into CPU RAM to eliminate disk I/O during training.
+        # Grayscale JPEG (single luminance channel) is ~2–4 MB per image vs ~7 MB for
+        # the original color JPEG, reducing total preload RAM from ~50 GB to ~15–30 GB.
+        # Preprocessing (ensure_landscape + to_grayscale) is applied once at load time;
+        # _load_base_tensor skips the preprocessor and decodes directly to float32.
+        # With Linux fork-based DataLoader workers, byte arrays are copy-on-write
+        # shared across all workers — stored once, not N times.
+        self._gray_jpeg_bytes: Optional[Dict[int, np.ndarray]] = None
+        if preload:
+            unique_indices = {
+                int(self.df.iloc[pos]["idx"])
+                for pos in self._valid_row_positions
+            }
+            self._gray_jpeg_bytes = {}
+            print(f"Preloading {len(unique_indices)} images as grayscale JPEG ...")
+            for idx in sorted(unique_indices):
+                img_path = os.path.join(self.photo_dir, f"{idx:04d}.JPG")
+                img_bgr = cv2.imread(img_path)
+                if img_bgr is None:
+                    raise FileNotFoundError(f"Preload failed: {img_path}")
+                # Reuse the preprocessor pipeline (ensure_landscape + to_grayscale).
+                # Convert float32 [0,1] → uint8 for lossless-quality JPEG storage.
+                tensor = self.preprocessor(img_bgr)          # (1, H, W) float32 [0,1]
+                gray_u8 = (tensor.squeeze(0).numpy() * 255).astype(np.uint8)  # (H, W) uint8
+                ok, buf = cv2.imencode(".jpg", gray_u8, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                if not ok:
+                    raise RuntimeError(f"JPEG encode failed for {idx:04d}.JPG")
+                self._gray_jpeg_bytes[idx] = buf.copy()
+            total_gb = sum(len(v) for v in self._gray_jpeg_bytes.values()) / 1e9
+            print(f"Preload complete: {len(self._gray_jpeg_bytes)} images, {total_gb:.2f} GB")
+
     # ---------------------------------------------------------------------------
     # Internal loaders
     # ---------------------------------------------------------------------------
 
     def _load_base_tensor(self, row_pos: int) -> torch.Tensor:
         row = self.df.iloc[row_pos]
-        img_path = os.path.join(self.photo_dir, f"{int(row['idx']):04d}.JPG")
+        idx = int(row["idx"])
+        if self._gray_jpeg_bytes is not None:
+            gray = cv2.imdecode(self._gray_jpeg_bytes[idx], cv2.IMREAD_GRAYSCALE)
+            if gray is None:
+                raise RuntimeError(f"Grayscale JPEG decode failed for {idx:04d}")
+            norm = gray.astype(np.float32) / 255.0
+            return torch.from_numpy(norm).unsqueeze(0)  # (1, H, W) float32
+        img_path = os.path.join(self.photo_dir, f"{idx:04d}.JPG")
         img_bgr = cv2.imread(img_path)
         if img_bgr is None:
-            raise FileNotFoundError(f"Image not found: {img_path}")
+            raise FileNotFoundError(f"Image not found: {idx:04d}.JPG")
         return self.preprocessor(img_bgr)   # (1, 4000, 6000) float32
 
     def _get_padded_tensor(self, slot_idx: int) -> torch.Tensor:

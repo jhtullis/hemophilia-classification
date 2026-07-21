@@ -338,6 +338,7 @@ CONFIGS = {
         "mask_min_fg":          0.03,
         "include_grid":         True,
         "uniform_fraction":     0.00,
+        "preload":              True,   # grayscale JPEG preload: ~15–30 GB CPU RAM
     },
 
     # ── mpatch_v0_i: compile test ─────────────────────────────────────────────

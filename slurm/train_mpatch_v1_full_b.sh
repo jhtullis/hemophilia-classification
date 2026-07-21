@@ -2,7 +2,7 @@
 #SBATCH --job-name=fibrin_mpatch_v1_full_b
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=70G
+#SBATCH --mem=90G
 #SBATCH --partition=eng,m13h,mgh
 #SBATCH --gres=gpu:1
 #SBATCH --time=12:00:00
