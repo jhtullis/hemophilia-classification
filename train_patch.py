@@ -287,6 +287,9 @@ def main(
         _MASK_VERSION = cfg["mask_version"]
         _PC_VERSION   = cfg["patch_center_version"]
         _UNIFORM_FRAC = cfg.get("uniform_fraction", 0.00)
+        _INCLUDE_GRID = cfg.get("include_grid", True)
+        _CSV_PATH     = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                     "data", "img-metadata.csv")
 
         train_ds = MaskedFullPatchDataset(
             train_df, photo_dir, preprocessor,
@@ -294,6 +297,8 @@ def main(
             mask_version=_MASK_VERSION,
             patch_center_version=_PC_VERSION,
             uniform_fraction=_UNIFORM_FRAC,
+            include_grid=_INCLUDE_GRID,
+            csv_path=_CSV_PATH if _INCLUDE_GRID else None,
         )
         val_ds = MaskedFullPatchDataset(
             val_df, photo_dir, preprocessor,
@@ -301,6 +306,7 @@ def main(
             mask_version=_MASK_VERSION,
             patch_center_version=_PC_VERSION,
             uniform_fraction=1.0,   # equal patches per image for fair val comparison
+            include_grid=False,     # val always uses primary images only
         )
         train_sampler = train_ds.make_sampler()
 
@@ -450,6 +456,7 @@ def main(
             "mask_version":              _MASK_VERSION,
             "patch_center_version":      _PC_VERSION,
             "mask_min_fg":               cfg.get("mask_min_fg", 0.03),
+            "include_grid":              _INCLUDE_GRID,
             "coverage_multiplier":       train_ds.coverage_multiplier,
             "train_uniform_fraction":    train_ds.uniform_fraction,
             "val_uniform_fraction":      val_ds.uniform_fraction,

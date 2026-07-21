@@ -298,6 +298,7 @@ CONFIGS = {
     # Extracts 2000×2000 patches from 6000×4000 JPEGs (no min-pool).
     # Center masks reused from p200_circle_v_intensity (upscaled 10× on the fly).
     # Run on H200 partitions (eng, m13h, mgh); batch_size=512 → ~56 GB peak.
+    # include_grid=True is the default for all mpatch_v1_full models.
 
     "mpatch_v1_full_a": {
         **_PATCH_V0_BASE,
@@ -315,7 +316,27 @@ CONFIGS = {
         "mask_version":         "v_intensity",
         "patch_center_version": "p200_circle_v_intensity",
         "mask_min_fg":          0.03,
-        "include_grid":         False,
+        "include_grid":         False,  # original run without grid; keep frozen
+        "uniform_fraction":     0.00,
+    },
+
+    "mpatch_v1_full_b": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v1_full_b",
+        "model_dir":            "models/mpatch_v1_full_b",
+        "lr":                   3e-3,   # ×3 sqrt scaling vs _a (include_grid ~9× more images → √9=3)
+        "weight_decay":         2.5e-3, # ×2.5 scaling vs _a (batch size increase)
+        "T_0":                  100,
+        "T_mult":               1.5,
+        "eta_min":              3e-4,   # ×3 sqrt scaling vs _a
+        "dropout":              0.3,
+        "batch_size":           512,
+        "head_type":            "ce",
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         True,
         "uniform_fraction":     0.00,
     },
 

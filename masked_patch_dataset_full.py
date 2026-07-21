@@ -34,7 +34,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset, WeightedRandomSampler
 
-from data_loader import CLASS_MAP, CLASS_NAMES
+from data_loader import CLASS_MAP, CLASS_NAMES, load_metadata_csv
 from model_patch_full import OVERSIZED_FULL, PAD_FULL, PATCH_SIZE_FULL
 from patch_dataset import _pad_tensor
 
@@ -87,8 +87,17 @@ class MaskedFullPatchDataset(Dataset):
         coverage_multiplier: float = 2.0,
         uniform_fraction: float = 0.0,
         validate_classes: bool = True,
+        include_grid: bool = False,
+        csv_path: Optional[str] = None,
     ) -> None:
         self.df = df.reset_index(drop=True)
+
+        if include_grid:
+            if csv_path is None:
+                raise ValueError("csv_path is required when include_grid=True")
+            grid_all = load_metadata_csv(csv_path)
+            grid_df = grid_all[grid_all["img_type"] == "endpoint_64"].reset_index(drop=True)
+            self.df = pd.concat([self.df, grid_df]).reset_index(drop=True)
         self.photo_dir = photo_dir
         self.preprocessor = preprocessor
         self.mask_dir = mask_dir
