@@ -97,7 +97,11 @@ class MaskedFullPatchDataset(Dataset):
             if csv_path is None:
                 raise ValueError("csv_path is required when include_grid=True")
             grid_all = load_metadata_csv(csv_path)
-            grid_df = grid_all[grid_all["img_type"] == "endpoint_64"].reset_index(drop=True)
+            split_exps = set(df["Experiment"])
+            grid_df = grid_all[
+                (grid_all["img_type"] == "endpoint_64") &
+                (grid_all["Experiment"].isin(split_exps))
+            ].reset_index(drop=True)
             self.df = pd.concat([self.df, grid_df]).reset_index(drop=True)
         self.photo_dir = photo_dir
         self.preprocessor = preprocessor

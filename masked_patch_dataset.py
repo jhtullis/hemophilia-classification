@@ -142,12 +142,17 @@ class MaskedPatchDataset(Dataset):
         self.coverage_multiplier = coverage_multiplier
         self.uniform_fraction = uniform_fraction
 
-        # Optionally extend with grid images
+        # Optionally extend with grid images, restricted to the same experiments
+        # present in the passed split — prevents val/test grid images leaking into train.
         if include_grid:
             if csv_path is None:
                 raise ValueError("csv_path is required when include_grid=True")
             grid_all = load_metadata_csv(csv_path)
-            grid_df = grid_all[grid_all["img_type"] == "endpoint_64"].reset_index(drop=True)
+            split_exps = set(df["Experiment"])
+            grid_df = grid_all[
+                (grid_all["img_type"] == "endpoint_64") &
+                (grid_all["Experiment"].isin(split_exps))
+            ].reset_index(drop=True)
             self.df = pd.concat([df, grid_df]).reset_index(drop=True)
             if preload and len(self.df) > 2000:
                 warnings.warn(
