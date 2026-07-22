@@ -31,6 +31,8 @@ class PatchAugmentation(nn.Module):
                      [max(0, 1-b), 1+b]. 0.0 disables brightness jitter.
         contrast:    ColorJitter contrast factor — samples multiplier from
                      [max(0, 1-c), 1+c]. 0.0 disables contrast jitter.
+        noise_std:   Standard deviation of additive Gaussian noise (in [0,1] pixel
+                     space). Applied after ColorJitter. 0.0 disables noise.
 
     Usage in training_step (after batch is on GPU):
         patches = self.augmentation(patches)
@@ -45,6 +47,7 @@ class PatchAugmentation(nn.Module):
         p_flip: float = 0.5,
         brightness: float = 0.0,
         contrast: float = 0.0,
+        noise_std: float = 0.0,
     ) -> None:
         super().__init__()
         transforms = [
@@ -68,6 +71,10 @@ class PatchAugmentation(nn.Module):
                     hue=0.0,
                     p=1.0,
                 )
+            )
+        if noise_std > 0.0:
+            transforms.append(
+                K.RandomGaussianNoise(mean=0.0, std=noise_std, p=1.0)
             )
         self.augment = K.AugmentationSequential(
             *transforms,

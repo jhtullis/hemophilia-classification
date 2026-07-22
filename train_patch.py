@@ -408,6 +408,7 @@ def main(
         patch_size=_PATCH_SZ,
         brightness=cfg.get("aug_brightness", 0.0),
         contrast=cfg.get("aug_contrast", 0.0),
+        noise_std=cfg.get("aug_noise_std", 0.0),
     ).to(device)
     center_crop = K.CenterCrop(_PATCH_SZ)
     class_weights = _compute_class_weights(train_df, device)
@@ -493,6 +494,7 @@ def main(
         "amp_dtype":   str(gpu_cfg["amp_dtype"]),
         "aug_brightness": cfg.get("aug_brightness", 0.0),
         "aug_contrast":   cfg.get("aug_contrast",   0.0),
+        "aug_noise_std":  cfg.get("aug_noise_std",  0.0),
         "variant": config_name,
     }
     if is_full_res:

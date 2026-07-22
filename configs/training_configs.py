@@ -427,6 +427,28 @@ CONFIGS = {
         "preload_device":       "cuda",
     },
 
+    # ── mpatch_v0_f_aug: standard mpatch_v0_f + brightness/contrast jitter ──
+    # Identical to mpatch_v0_f (cosine scheduler, CPU preload, full partition list)
+    # but with ColorJitter added to the training augmentation pipeline.
+
+    "mpatch_v0_f_aug": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v0_f_aug",
+        "model_dir":            "models/mpatch_v0_f_aug",
+        "head_type":            "ce",
+        "T_mult":               1.5,
+        "eta_min":              1e-4,
+        "dropout":              0.3,
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         True,
+        "uniform_fraction":     0.00,
+        "aug_brightness":       0.15,
+        "aug_contrast":         0.20,
+    },
+
     # ── mpatch_v0 "_lite_aug" variants: lite + brightness/contrast jitter ────
     # Identical to the corresponding _lite model but add ColorJitter after flips:
     #   aug_brightness=0.15  → brightness multiplier ~ U(0.85, 1.15)
@@ -473,6 +495,32 @@ CONFIGS = {
         "preload_device":       "cuda",
         "aug_brightness":       0.15,
         "aug_contrast":         0.20,
+    },
+
+    # ── mpatch_v0f_lite_aug2: lite_aug + additive Gaussian noise ─────────────
+    # Identical to mpatch_v0f_lite_aug but adds Gaussian noise (std=0.03) after
+    # ColorJitter. Pipeline order: rotation → crop → flips → jitter → noise.
+
+    "mpatch_v0f_lite_aug2": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v0f_lite_aug2",
+        "model_dir":            "models/mpatch_v0f_lite_aug2",
+        "lr":                   2e-3,
+        "head_type":            "ce",
+        "dropout":              0.3,
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         True,
+        "uniform_fraction":     0.00,
+        "scheduler_type":       "plateau",
+        "plateau_factor":       0.95,
+        "plateau_patience":     5,
+        "preload_device":       "cuda",
+        "aug_brightness":       0.15,
+        "aug_contrast":         0.20,
+        "aug_noise_std":        0.03,
     },
 
     # ── mpatch_v0_i: compile test ─────────────────────────────────────────────
