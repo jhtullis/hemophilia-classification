@@ -7,6 +7,8 @@ Total across 10,000 epochs: ~30 periodic files ≈ 150 MB per model directory.
 Public API:
     should_save_periodic(epoch, max_epochs) -> bool
     save_checkpoint(state, model_dir, epoch, is_best, max_epochs)
+    save_topk_checkpoints(model_dir, model_state_dict, epoch, val_acc, period_idx,
+                           period_k, alltime_k)
     load_latest_checkpoint(model_dir) -> dict | None
     log_epoch(model_dir, row_dict)
     init_wandb(config, model_type, project, entity, run_name, run_id, resume_run, enabled)
@@ -15,6 +17,7 @@ Public API:
 """
 
 import csv
+import json
 import os
 
 import torch
@@ -164,6 +167,87 @@ def save_checkpoint(
     if is_best:
         best_path = os.path.join(model_dir, "best_model.pth")
         torch.save(state["model_state_dict"], best_path)
+
+
+def save_topk_checkpoints(
+    model_dir: str,
+    model_state_dict: dict,
+    epoch: int,
+    val_acc: float,
+    period_idx: int,
+    period_k: int = 3,
+    alltime_k: int = 9,
+) -> None:
+    """Maintain a top-k-by-val_acc checkpoint pool for later ensembling.
+
+    Keeps two rankings, tracked in checkpoints/topk_manifest.json:
+      - "periods"[str(period_idx)]: top `period_k` epochs within this training period
+      - "alltime": top `alltime_k` epochs across all periods
+
+    A weight file is written whenever this epoch qualifies for either ranking
+    (one file per epoch, shared by both rankings if it qualifies for both).
+    Files are NEVER deleted, even once displaced out of a ranking by a later,
+    better epoch — only their manifest entry is dropped. This guarantees the
+    on-disk pool always contains at least the true top-k for each ranking,
+    growing permanently over the course of training.
+    """
+    ckpt_dir = os.path.join(model_dir, "checkpoints")
+    topk_dir = os.path.join(ckpt_dir, "topk")
+    os.makedirs(topk_dir, exist_ok=True)
+
+    manifest_path = os.path.join(ckpt_dir, "topk_manifest.json")
+    if os.path.exists(manifest_path):
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+    else:
+        manifest = {"alltime": [], "periods": {}}
+
+    period_key = str(period_idx)
+    period_list = manifest["periods"].get(period_key, [])
+    alltime_list = manifest["alltime"]
+
+    qualifies_period = (
+        len(period_list) < period_k
+        or val_acc > min(e["val_acc"] for e in period_list)
+    )
+    qualifies_alltime = (
+        len(alltime_list) < alltime_k
+        or val_acc > min(e["val_acc"] for e in alltime_list)
+    )
+
+    if not (qualifies_period or qualifies_alltime):
+        return
+
+    rel_path = os.path.join(
+        "topk", f"period{period_idx:03d}_epoch{epoch:05d}_acc{val_acc:.4f}.pth"
+    )
+    abs_path = os.path.join(ckpt_dir, rel_path)
+    torch.save(
+        {
+            "epoch": epoch,
+            "val_acc": val_acc,
+            "period_idx": period_idx,
+            "model_state_dict": model_state_dict,
+        },
+        abs_path,
+    )
+    entry = {"epoch": epoch, "val_acc": val_acc, "period_idx": period_idx, "path": rel_path}
+
+    if qualifies_period:
+        period_list.append(entry)
+        period_list.sort(key=lambda e: e["val_acc"], reverse=True)
+        manifest["periods"][period_key] = period_list[:period_k]
+
+    if qualifies_alltime:
+        alltime_list.append(entry)
+        alltime_list.sort(key=lambda e: e["val_acc"], reverse=True)
+        manifest["alltime"] = alltime_list[:alltime_k]
+
+    tmp_path = manifest_path + ".tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(manifest, f, indent=2)
+    os.replace(tmp_path, manifest_path)
+    print(f"  [ckpt] topk pool → {abs_path}")
 
 
 def load_latest_checkpoint(model_dir: str, map_location=None) -> dict | None:

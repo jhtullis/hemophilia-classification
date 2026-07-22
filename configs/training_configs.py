@@ -266,6 +266,44 @@ CONFIGS = {
         "uniform_fraction":     0.00,
     },
 
+    # ── mpatch_v0_e_ensw/f_ensw: exact replicas of e/f with a top-k checkpoint ──
+    # pool (top 3 per training period + top 9 all-time, by val_acc, never
+    # deleted) accumulated for a later ensembling test.
+
+    "mpatch_v0_e_ensw": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v0_e_ensw",
+        "model_dir":            "models/mpatch_v0_e_ensw",
+        "head_type":            "ce",
+        "T_mult":               1.5,
+        "eta_min":              1e-4,
+        "dropout":              0.3,
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         True,
+        "uniform_fraction":     0.10,
+        "topk_ensemble_save":   True,
+    },
+
+    "mpatch_v0_f_ensw": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v0_f_ensw",
+        "model_dir":            "models/mpatch_v0_f_ensw",
+        "head_type":            "ce",
+        "T_mult":               1.5,
+        "eta_min":              1e-4,
+        "dropout":              0.3,
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         True,
+        "uniform_fraction":     0.00,
+        "topk_ensemble_save":   True,
+    },
+
     "mpatch_v0_g": {
         **_PATCH_V0_BASE,
         "model_type":           "mpatch_v0_g",
@@ -627,5 +665,33 @@ CONFIGS = {
         "include_grid":         True,
         "force_compile":        True,
         "compile_backend":      "cudagraphs",
+    },
+
+    # ── mpatch_v1e_2xmp: 2x min-pool high-resolution patch pipeline ──────────
+    # Images 2x min-pooled (2000x3000, vs 600x400 at 10x) instead of unpooled or
+    # 10x-pooled. Patches are 1000x1000 (PATCH_SIZE_2X), same physical footprint as the
+    # 200x200 patches at 10x-pool and the 2000x2000 patches in mpatch_v1_full. Center
+    # masks reused from p200_circle_v_intensity (600x400), sampled at coarse granularity
+    # then jittered to the finer 2x-pool grid -- see masked_patch_dataset_2x.py.
+    # Mirrors mpatch_v0_e's training paradigm (CE head, exploratory+grid,
+    # uniform_fraction=0.10). GPU-preloads pooled images as uint8 (~32GB) directly onto
+    # the device -- requires an H200 (run on H200 partitions: eng, m13h, mgh).
+    "mpatch_v1e_2xmp": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v1e_2xmp",
+        "model_dir":            "models/mpatch_v1e_2xmp",
+        "resolution_variant":   "2x",
+        "head_type":            "ce",
+        "T_mult":               1.5,
+        "eta_min":              1e-4,
+        "dropout":              0.3,
+        "batch_size":           64,
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         True,
+        "uniform_fraction":     0.10,
+        "preload_device":       "cuda",
     },
 }

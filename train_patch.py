@@ -38,6 +38,7 @@ from checkpoint_manager import (
     load_latest_checkpoint,
     log_epoch,
     save_checkpoint,
+    save_topk_checkpoints,
     should_save_periodic,
 )
 from data_loader import CLASS_MAP, CLASS_NAMES
@@ -302,8 +303,9 @@ def main(
             model_dir=model_dir,
         )
 
-    is_full_res = config_name.startswith("mpatch_v1_full")
-    is_masked   = config_name.startswith("mpatch_") and not is_full_res
+    is_2x_res   = cfg.get("resolution_variant") == "2x"
+    is_full_res = config_name.startswith("mpatch_v1_full") and not is_2x_res
+    is_masked   = config_name.startswith("mpatch_") and not is_full_res and not is_2x_res
 
     if is_full_res:
         from masked_patch_dataset_full import MaskedFullPatchDataset
@@ -340,6 +342,48 @@ def main(
             uniform_fraction=1.0,   # equal patches per image for fair val comparison
             include_grid=False,     # val always uses primary images only
             preload=_PRELOAD,
+        )
+        train_sampler = train_ds.make_sampler()
+
+    elif is_2x_res:
+        from masked_patch_dataset_2x import MaskedPatch2xDataset
+
+        preprocessor = make_preprocessor(pool_factor=2)
+        _MASK_DIR       = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                       cfg["mask_dir"])
+        _MASK_VERSION   = cfg["mask_version"]
+        _PC_VERSION     = cfg["patch_center_version"]
+        _INCLUDE_GRID   = cfg.get("include_grid", False)
+        _CSV_PATH       = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                       "data", "img-metadata.csv")
+
+        _UNIFORM_FRAC     = cfg.get("uniform_fraction",     0.20)
+        _VAL_UNIFORM_FRAC = cfg.get("val_uniform_fraction", 1.0)
+
+        # GPU preloading: store unpadded (1,2000,3000) uint8 tensors on device.
+        # Requires num_workers=0 — DataLoader workers are separate processes and cannot
+        # access CUDA tensors created in the main process.
+        _PRELOAD_DEVICE_STR = cfg.get("preload_device", None)
+        _PRELOAD_DEVICE = torch.device(_PRELOAD_DEVICE_STR) if _PRELOAD_DEVICE_STR else None
+
+        train_ds = MaskedPatch2xDataset(
+            train_df, photo_dir, preprocessor,
+            mask_dir=_MASK_DIR,
+            mask_version=_MASK_VERSION,
+            patch_center_version=_PC_VERSION,
+            include_grid=_INCLUDE_GRID,
+            csv_path=_CSV_PATH,
+            uniform_fraction=_UNIFORM_FRAC,
+            preload_device=_PRELOAD_DEVICE,
+        )
+        val_ds = MaskedPatch2xDataset(
+            val_df, photo_dir, preprocessor,
+            mask_dir=_MASK_DIR,
+            mask_version=_MASK_VERSION,
+            patch_center_version=_PC_VERSION,
+            include_grid=False,     # val always uses primary images only
+            uniform_fraction=_VAL_UNIFORM_FRAC,
+            preload_device=_PRELOAD_DEVICE,
         )
         train_sampler = train_ds.make_sampler()
 
@@ -401,7 +445,7 @@ def main(
         train_sampler = make_patch_sampler(train_ds)
     # GPU preloading requires num_workers=0: DataLoader workers are forked subprocesses
     # and cannot safely access CUDA tensors created in the main process.
-    _gpu_preload = is_masked and cfg.get("preload_device") is not None
+    _gpu_preload = (is_masked or is_2x_res) and cfg.get("preload_device") is not None
     _dl_workers  = 0     if _gpu_preload else num_workers
     _dl_pin      = False if _gpu_preload else True
     train_loader = DataLoader(
@@ -422,6 +466,12 @@ def main(
         _OVERSIZED = OVERSIZED_FULL
         model = FibrinPatchCNNFull(num_classes=num_classes, dropout_p=DROPOUT_P,
                                    head_type=HEAD_TYPE).to(device)
+    elif is_2x_res:
+        from model_patch_2x import FibrinPatchCNN2x, PATCH_SIZE_2X, OVERSIZED_2X
+        _PATCH_SZ  = PATCH_SIZE_2X
+        _OVERSIZED = OVERSIZED_2X
+        model = FibrinPatchCNN2x(num_classes=num_classes, dropout_p=DROPOUT_P,
+                                 head_type=HEAD_TYPE).to(device)
     else:
         _PATCH_SZ  = PATCH_SIZE
         _OVERSIZED = OVERSIZED
@@ -474,6 +524,7 @@ def main(
         no_improve_streak = ckpt.get("no_improve_streak", 0)
         history           = ckpt.get("history", [])
         wandb_run_id      = ckpt.get("wandb_run_id")
+        period_idx        = ckpt.get("period_idx", 0) + 1
     else:
         start_epoch       = 0
         best_val_acc      = 0.0
@@ -481,6 +532,7 @@ def main(
         no_improve_streak = 0
         history           = []
         wandb_run_id      = None
+        period_idx        = 0
         pretrain_dir = cfg.get("pretrain_model_dir")
         if pretrain_dir:
             pretrain_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -521,7 +573,7 @@ def main(
         "head_type": HEAD_TYPE,
         "patch_size": _PATCH_SZ,
         "oversized": _OVERSIZED,
-        "patches_per_image": train_ds._total_patches if (is_masked or is_full_res) else patches_per_image,
+        "patches_per_image": train_ds._total_patches if (is_masked or is_full_res or is_2x_res) else patches_per_image,
         "num_classes": num_classes,
         "max_epochs": max_epochs,
         "epochs_per_job": epochs_per_job,
@@ -562,6 +614,19 @@ def main(
             "coverage_multiplier":       train_ds.coverage_multiplier,
             "train_uniform_fraction":    train_ds.uniform_fraction,
             "val_uniform_fraction":      val_ds.uniform_fraction,   # 0.20 for a-d, 1.0 for e+
+            "n_train_images":            len(train_ds._valid_row_positions),
+            "preload_device":            str(_PRELOAD_DEVICE) if _PRELOAD_DEVICE else None,
+        })
+    elif is_2x_res:
+        config.update({
+            "dataset":              "masked_patch_2x",
+            "mask_version":         _MASK_VERSION,
+            "patch_center_version": _PC_VERSION,
+            "mask_min_fg":          cfg.get("mask_min_fg", 0.03),
+            "include_grid":         _INCLUDE_GRID,
+            "coverage_multiplier":       train_ds.coverage_multiplier,
+            "train_uniform_fraction":    train_ds.uniform_fraction,
+            "val_uniform_fraction":      val_ds.uniform_fraction,
             "n_train_images":            len(train_ds._valid_row_positions),
             "preload_device":            str(_PRELOAD_DEVICE) if _PRELOAD_DEVICE else None,
         })
@@ -743,8 +808,16 @@ def main(
             "phase": "training",
             "config": config,
             "wandb_run_id": get_wandb_run_id(),
+            "period_idx": period_idx,
         }
         save_checkpoint(state, model_dir, epoch, is_best, max_epochs)
+
+        if cfg.get("topk_ensemble_save", False):
+            save_topk_checkpoints(
+                model_dir, state["model_state_dict"], epoch, val_acc, period_idx,
+                period_k=cfg.get("topk_period_k", 3),
+                alltime_k=cfg.get("topk_alltime_k", 9),
+            )
 
         # Early-stop termination (after checkpoint so last epoch is always saved)
         if cfg.get("early_stop", False):

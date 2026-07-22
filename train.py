@@ -69,6 +69,7 @@ def main():
             "mpatch_v1e_lite_lc05a", "mpatch_v1e_lite_lc10a", "mpatch_v1e_lite_lc15a",
             "mpatch_v1e_lite_lc20a", "mpatch_v1e_lite_lc25a", "mpatch_v1e_lite_lc30a",
             "mpatch_v1e_lite_lc35a",
+            "mpatch_v1e_2xmp",
         ],
         help="Which model to train.",
     )
@@ -149,6 +150,7 @@ def main():
         "mpatch_v0_a", "mpatch_v0_b", "mpatch_v0_c", "mpatch_v0_d",
         "mpatch_v0_e", "mpatch_v0_f", "mpatch_v0_g", "mpatch_v0_h",
         "mpatch_v0_i",
+        "mpatch_v0_e_ensw", "mpatch_v0_f_ensw",
         "mpatch_v0_f1a",
         "mpatch_v0e_lite", "mpatch_v0f_lite", "mpatch_v0g_lite", "mpatch_v0h_lite",
         "mpatch_v0_f_aug",
@@ -158,6 +160,7 @@ def main():
         "mpatch_v1e_lite_lc05a", "mpatch_v1e_lite_lc10a", "mpatch_v1e_lite_lc15a",
         "mpatch_v1e_lite_lc20a", "mpatch_v1e_lite_lc25a", "mpatch_v1e_lite_lc30a",
         "mpatch_v1e_lite_lc35a",
+        "mpatch_v1e_2xmp",
     ):
         from train_patch import main as _train
         _train(**common, config_name=args.model_type)
