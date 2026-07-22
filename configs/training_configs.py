@@ -35,6 +35,31 @@ _PATCH_V0_BASE = {
     "grad_clip":       None,
 }
 
+_MPATCH_V1E_LITE_LC_BASE = {
+    **_PATCH_V0_BASE,           # batch_size=64, weight_decay=1e-3, etc.
+    "lr":                   2e-3,
+    "head_type":            "ce",
+    "dropout":              0.3,
+    "mask_dir":             "masks",
+    "mask_version":         "v_intensity",
+    "patch_center_version": "p200_circle_v_intensity",
+    "mask_min_fg":          0.03,
+    "include_grid":         True,
+    "uniform_fraction":     0.10,       # matches mpatch_v0e_lite
+    "scheduler_type":       "plateau",
+    "plateau_factor":       0.95,
+    "plateau_patience":     5,
+    "plateau_mode":         "min",      # track val_loss, not val_acc
+    "plateau_metric":       "loss",
+    "plateau_threshold":    1e-4,
+    "preload_device":       "cuda",     # unpadded (1,400,600) float32 on GPU; num_workers=0
+    "split_source_dir":     "models/mpatch_v0e_lite",   # share exact split record
+    "early_stop":           True,
+    "early_stop_min_epochs": 1000,
+    "early_stop_patience":  30,
+    "early_stop_threshold": 1e-4,
+}
+
 # ── 5class_hpc variants ───────────────────────────────────────────────────────
 
 CONFIGS = {
@@ -521,6 +546,64 @@ CONFIGS = {
         "aug_brightness":       0.15,
         "aug_contrast":         0.20,
         "aug_noise_std":        0.03,
+    },
+
+    # ── mpatch_v1e_lite learning curve series ────────────────────────────────
+    # Mirrors mpatch_v0e_lite (10x min-pool, FibrinPatchCNN, GPU preload, CE head)
+    # but trains on progressively smaller subsets of the training experiments
+    # (1–7 per class → 5–35 total), for learning curve analysis.
+    # All 7 models share the exact same train/val/test split as mpatch_v0e_lite.
+    # Scheduler: ReduceLROnPlateau tracking val_loss (min, threshold=1e-4).
+    # Early stopping: after 1000 epochs, 30 consecutive epochs without ≥1e-4
+    # improvement in val_loss triggers sys.exit(100) (no Slurm resubmit).
+
+    "mpatch_v1e_lite_lc35a": {
+        **_MPATCH_V1E_LITE_LC_BASE,
+        "model_type":     "mpatch_v1e_lite_lc35a",
+        "model_dir":      "models/mpatch_v1e_lite_lc35a",
+        "lc_n_per_class": 7, "lc_seed": 35,
+    },
+
+    "mpatch_v1e_lite_lc30a": {
+        **_MPATCH_V1E_LITE_LC_BASE,
+        "model_type":     "mpatch_v1e_lite_lc30a",
+        "model_dir":      "models/mpatch_v1e_lite_lc30a",
+        "lc_n_per_class": 6, "lc_seed": 30,
+    },
+
+    "mpatch_v1e_lite_lc25a": {
+        **_MPATCH_V1E_LITE_LC_BASE,
+        "model_type":     "mpatch_v1e_lite_lc25a",
+        "model_dir":      "models/mpatch_v1e_lite_lc25a",
+        "lc_n_per_class": 5, "lc_seed": 25,
+    },
+
+    "mpatch_v1e_lite_lc20a": {
+        **_MPATCH_V1E_LITE_LC_BASE,
+        "model_type":     "mpatch_v1e_lite_lc20a",
+        "model_dir":      "models/mpatch_v1e_lite_lc20a",
+        "lc_n_per_class": 4, "lc_seed": 20,
+    },
+
+    "mpatch_v1e_lite_lc15a": {
+        **_MPATCH_V1E_LITE_LC_BASE,
+        "model_type":     "mpatch_v1e_lite_lc15a",
+        "model_dir":      "models/mpatch_v1e_lite_lc15a",
+        "lc_n_per_class": 3, "lc_seed": 15,
+    },
+
+    "mpatch_v1e_lite_lc10a": {
+        **_MPATCH_V1E_LITE_LC_BASE,
+        "model_type":     "mpatch_v1e_lite_lc10a",
+        "model_dir":      "models/mpatch_v1e_lite_lc10a",
+        "lc_n_per_class": 2, "lc_seed": 10,
+    },
+
+    "mpatch_v1e_lite_lc05a": {
+        **_MPATCH_V1E_LITE_LC_BASE,
+        "model_type":     "mpatch_v1e_lite_lc05a",
+        "model_dir":      "models/mpatch_v1e_lite_lc05a",
+        "lc_n_per_class": 1, "lc_seed": 5,
     },
 
     # ── mpatch_v0_i: compile test ─────────────────────────────────────────────

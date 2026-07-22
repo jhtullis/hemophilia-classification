@@ -66,6 +66,9 @@ def main():
             "mpatch_v0e_lite_aug", "mpatch_v0f_lite_aug", "mpatch_v0f_lite_aug2",
             "mpatch_v1_full_a",
             "mpatch_v1_full_b",
+            "mpatch_v1e_lite_lc05a", "mpatch_v1e_lite_lc10a", "mpatch_v1e_lite_lc15a",
+            "mpatch_v1e_lite_lc20a", "mpatch_v1e_lite_lc25a", "mpatch_v1e_lite_lc30a",
+            "mpatch_v1e_lite_lc35a",
         ],
         help="Which model to train.",
     )
@@ -152,6 +155,9 @@ def main():
         "mpatch_v0e_lite_aug", "mpatch_v0f_lite_aug", "mpatch_v0f_lite_aug2",
         "mpatch_v1_full_a",
         "mpatch_v1_full_b",
+        "mpatch_v1e_lite_lc05a", "mpatch_v1e_lite_lc10a", "mpatch_v1e_lite_lc15a",
+        "mpatch_v1e_lite_lc20a", "mpatch_v1e_lite_lc25a", "mpatch_v1e_lite_lc30a",
+        "mpatch_v1e_lite_lc35a",
     ):
         from train_patch import main as _train
         _train(**common, config_name=args.model_type)

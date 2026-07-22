@@ -78,8 +78,15 @@ MODEL_REGISTRY: Dict[str, Tuple[str, int, dict]] = {
     "mpatch_v0e_lite_aug":  (os.path.join(_DIR, "models", "mpatch_v0e_lite_aug"),     5, CLASS_MAP),
     "mpatch_v0f_lite_aug":  (os.path.join(_DIR, "models", "mpatch_v0f_lite_aug"),     5, CLASS_MAP),
     "mpatch_v0f_lite_aug2": (os.path.join(_DIR, "models", "mpatch_v0f_lite_aug2"),    5, CLASS_MAP),
-    "mpatch_v1_full_a":     (os.path.join(_DIR, "models", "mpatch_v1_full_a"),       5, CLASS_MAP),
-    "mpatch_v1_full_b":     (os.path.join(_DIR, "models", "mpatch_v1_full_b"),       5, CLASS_MAP),
+    "mpatch_v1_full_a":          (os.path.join(_DIR, "models", "mpatch_v1_full_a"),          5, CLASS_MAP),
+    "mpatch_v1_full_b":          (os.path.join(_DIR, "models", "mpatch_v1_full_b"),          5, CLASS_MAP),
+    "mpatch_v1e_lite_lc05a":     (os.path.join(_DIR, "models", "mpatch_v1e_lite_lc05a"),     5, CLASS_MAP),
+    "mpatch_v1e_lite_lc10a":     (os.path.join(_DIR, "models", "mpatch_v1e_lite_lc10a"),     5, CLASS_MAP),
+    "mpatch_v1e_lite_lc15a":     (os.path.join(_DIR, "models", "mpatch_v1e_lite_lc15a"),     5, CLASS_MAP),
+    "mpatch_v1e_lite_lc20a":     (os.path.join(_DIR, "models", "mpatch_v1e_lite_lc20a"),     5, CLASS_MAP),
+    "mpatch_v1e_lite_lc25a":     (os.path.join(_DIR, "models", "mpatch_v1e_lite_lc25a"),     5, CLASS_MAP),
+    "mpatch_v1e_lite_lc30a":     (os.path.join(_DIR, "models", "mpatch_v1e_lite_lc30a"),     5, CLASS_MAP),
+    "mpatch_v1e_lite_lc35a":     (os.path.join(_DIR, "models", "mpatch_v1e_lite_lc35a"),     5, CLASS_MAP),
 }
 
 # ---------------------------------------------------------------------------
@@ -126,7 +133,7 @@ def load_model_from_registry(
         from configs.training_configs import CONFIGS as _TRAIN_CONFIGS
         _cfg = _TRAIN_CONFIGS.get(model_type, {})
         head_type = _cfg.get("head_type", "ce" if "v2" in model_type else "cosine")
-        if model_type.startswith("mpatch_v1"):
+        if model_type.startswith("mpatch_v1_full"):
             from model_patch_full import FibrinPatchCNNFull
             model = FibrinPatchCNNFull(num_classes=num_classes, head_type=head_type)
         else:

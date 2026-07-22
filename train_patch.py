@@ -48,6 +48,7 @@ from patch_dataset import (
     PATCHES_PER_IMAGE,
     FibrinPatchDataset,
     get_or_create_split,
+    get_lc_train_df,
     make_patch_sampler,
 )
 from preprocessing import make_preprocessor
@@ -272,9 +273,36 @@ def main(
           f"batch_size: {batch_size}  compile: {gpu_cfg['use_compile']}")
 
     # ── Data ────────────────────────────────────────────────────────────────
+    # Split sourcing: copy train_record_patch.json from source model if specified.
+    # Used by LC models to share the exact same experiment assignment as mpatch_v0e_lite.
+    _SPLIT_SOURCE = cfg.get("split_source_dir", None)
+    if _SPLIT_SOURCE is not None:
+        import shutil
+        src_record = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  _SPLIT_SOURCE, "train_record_patch.json")
+        dst_record = os.path.join(model_dir, "train_record_patch.json")
+        if not os.path.exists(dst_record):
+            if not os.path.exists(src_record):
+                raise FileNotFoundError(
+                    f"split_source_dir record not found: {src_record}\n"
+                    "Train mpatch_v0e_lite at least one epoch before launching LC models."
+                )
+            shutil.copy2(src_record, dst_record)
+            print(f"  Copied split record from {_SPLIT_SOURCE}")
+
     train_df, val_df, _ = get_or_create_split(model_dir, db_path)
 
-    is_full_res = config_name.startswith("mpatch_v1")
+    # LC experiment subsetting: applied on top of standard split (val_df is never touched).
+    _LC_N_PER_CLASS = cfg.get("lc_n_per_class", None)
+    if _LC_N_PER_CLASS is not None:
+        train_df = get_lc_train_df(
+            train_df,
+            n_per_class=_LC_N_PER_CLASS,
+            seed=cfg["lc_seed"],
+            model_dir=model_dir,
+        )
+
+    is_full_res = config_name.startswith("mpatch_v1_full")
     is_masked   = config_name.startswith("mpatch_") and not is_full_res
 
     if is_full_res:
@@ -419,9 +447,12 @@ def main(
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     if SCHEDULER_TYPE == "plateau":
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode="max",
-            factor=cfg.get("plateau_factor", 0.95),
-            patience=cfg.get("plateau_patience", 5),
+            optimizer,
+            mode           = cfg.get("plateau_mode",      "max"),
+            factor         = cfg.get("plateau_factor",    0.95),
+            patience       = cfg.get("plateau_patience",  5),
+            threshold      = cfg.get("plateau_threshold", 0.0),
+            threshold_mode = "abs",
         )
     else:
         scheduler = CosineAnnealingWarmRestartsF(
@@ -437,15 +468,19 @@ def main(
         model.load_state_dict(sd)
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         scheduler.load_state_dict(ckpt["scheduler_state_dict"])
-        start_epoch = ckpt["epoch"] + 1
-        best_val_acc = ckpt.get("best_acc", 0.0)
-        history = ckpt.get("history", [])
-        wandb_run_id = ckpt.get("wandb_run_id")
+        start_epoch       = ckpt["epoch"] + 1
+        best_val_acc      = ckpt.get("best_acc",          0.0)
+        best_val_loss     = ckpt.get("best_val_loss",     float("inf"))
+        no_improve_streak = ckpt.get("no_improve_streak", 0)
+        history           = ckpt.get("history", [])
+        wandb_run_id      = ckpt.get("wandb_run_id")
     else:
-        start_epoch = 0
-        best_val_acc = 0.0
-        history = []
-        wandb_run_id = None
+        start_epoch       = 0
+        best_val_acc      = 0.0
+        best_val_loss     = float("inf")
+        no_improve_streak = 0
+        history           = []
+        wandb_run_id      = None
         pretrain_dir = cfg.get("pretrain_model_dir")
         if pretrain_dir:
             pretrain_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -492,9 +527,16 @@ def main(
         "epochs_per_job": epochs_per_job,
         "amp_enabled": gpu_cfg["amp_enabled"],
         "amp_dtype":   str(gpu_cfg["amp_dtype"]),
-        "aug_brightness": cfg.get("aug_brightness", 0.0),
-        "aug_contrast":   cfg.get("aug_contrast",   0.0),
-        "aug_noise_std":  cfg.get("aug_noise_std",  0.0),
+        "aug_brightness":        cfg.get("aug_brightness",        0.0),
+        "aug_contrast":          cfg.get("aug_contrast",          0.0),
+        "aug_noise_std":         cfg.get("aug_noise_std",         0.0),
+        "plateau_mode":          cfg.get("plateau_mode",          "max"),
+        "plateau_metric":        cfg.get("plateau_metric",        "accuracy"),
+        "plateau_threshold":     cfg.get("plateau_threshold",     0.0),
+        "early_stop":            cfg.get("early_stop",            False),
+        "early_stop_min_epochs": cfg.get("early_stop_min_epochs", 1000),
+        "early_stop_patience":   cfg.get("early_stop_patience",   30),
+        "lc_n_per_class":        cfg.get("lc_n_per_class",        None),
         "variant": config_name,
     }
     if is_full_res:
@@ -600,11 +642,22 @@ def main(
         val_acc = val_correct / max(val_total, 1)
 
         if SCHEDULER_TYPE == "plateau":
-            scheduler.step(val_acc)
+            _step_val = (val_loss if cfg.get("plateau_metric", "accuracy") == "loss"
+                         else val_acc)
+            scheduler.step(_step_val)
 
         is_best = val_acc > best_val_acc
         if is_best:
             best_val_acc = val_acc
+
+        # Early-stopping state update (tracks val_loss; independent of best_val_acc).
+        if cfg.get("early_stop", False):
+            _es_thresh = cfg.get("early_stop_threshold", 1e-4)
+            if val_loss < best_val_loss - _es_thresh:
+                best_val_loss     = val_loss
+                no_improve_streak = 0
+            else:
+                no_improve_streak += 1
 
         lr_now = optimizer.param_groups[0]["lr"]
 
@@ -682,7 +735,9 @@ def main(
             "model_state_dict": getattr(model, "_orig_mod", model).state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "scheduler_state_dict": scheduler.state_dict(),
-            "best_acc": best_val_acc,
+            "best_acc":          best_val_acc,
+            "best_val_loss":     best_val_loss,
+            "no_improve_streak": no_improve_streak,
             "history": history,
             "model_type": config_name,
             "phase": "training",
@@ -690,6 +745,17 @@ def main(
             "wandb_run_id": get_wandb_run_id(),
         }
         save_checkpoint(state, model_dir, epoch, is_best, max_epochs)
+
+        # Early-stop termination (after checkpoint so last epoch is always saved)
+        if cfg.get("early_stop", False):
+            _es_patience = cfg.get("early_stop_patience",   30)
+            _es_min_ep   = cfg.get("early_stop_min_epochs", 1000)
+            if epoch + 1 >= _es_min_ep and no_improve_streak >= _es_patience:
+                print(f"Early stopping at epoch {epoch}: {no_improve_streak} epochs "
+                      f"without ≥{cfg.get('early_stop_threshold', 1e-4):.0e} "
+                      f"improvement in val_loss.")
+                finish_wandb()
+                sys.exit(100)   # Slurm: do not resubmit
 
         job_epochs_done += 1
         if job_epochs_done >= epochs_per_job:

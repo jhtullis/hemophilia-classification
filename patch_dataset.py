@@ -238,6 +238,45 @@ class FibrinPatchDataset(Dataset):
 # Balanced sampler (patch-dataset-aware replacement for make_balanced_sampler)
 # ---------------------------------------------------------------------------
 
+def get_lc_train_df(
+    train_df: pd.DataFrame,
+    n_per_class: int,
+    seed: int,
+    model_dir: str,
+) -> pd.DataFrame:
+    """Return a subset of train_df limited to n_per_class experiments per class.
+
+    Selection is seeded and saved to lc_experiments.json in model_dir so
+    Slurm restarts load the identical subset rather than re-sampling.
+    """
+    record_path = os.path.join(model_dir, "lc_experiments.json")
+
+    if os.path.exists(record_path):
+        with open(record_path) as f:
+            record = json.load(f)
+        selected = set(record["selected_experiments"])
+        print(f"  LC subset loaded ({n_per_class}/class, seed={seed}): {len(selected)} experiments")
+        return train_df[train_df["Experiment"].isin(selected)].reset_index(drop=True)
+
+    rng = np.random.default_rng(seed)
+    selected, by_class = [], {}
+    for cls in sorted(train_df["Exp_Type"].unique()):
+        pool = sorted(train_df[train_df["Exp_Type"] == cls]["Experiment"].unique().tolist())
+        chosen = sorted(rng.choice(pool, size=n_per_class, replace=False).tolist())
+        selected.extend(chosen)
+        by_class[cls] = chosen
+
+    os.makedirs(model_dir, exist_ok=True)
+    with open(record_path, "w") as f:
+        json.dump(
+            {"n_per_class": n_per_class, "seed": seed,
+             "selected_experiments": sorted(selected), "by_class": by_class},
+            f, indent=2,
+        )
+    print(f"  LC subset created ({n_per_class}/class, seed={seed}): {len(selected)} experiments")
+    return train_df[train_df["Experiment"].isin(set(selected))].reset_index(drop=True)
+
+
 def make_patch_sampler(dataset: FibrinPatchDataset) -> WeightedRandomSampler:
     """WeightedRandomSampler that equalises class frequency.
 
