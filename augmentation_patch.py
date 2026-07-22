@@ -22,17 +22,32 @@ class PatchAugmentation(nn.Module):
       2. CenterCrop:     discard rotated corners → 200×200
       3. RandomHorizontalFlip
       4. RandomVerticalFlip
+      5. ColorJitter:    brightness + contrast (only when brightness > 0 or contrast > 0)
+
+    Args:
+        patch_size:  Output spatial size after CenterCrop (default 200).
+        p_flip:      Probability of each flip (default 0.5).
+        brightness:  ColorJitter brightness factor — samples multiplier from
+                     [max(0, 1-b), 1+b]. 0.0 disables brightness jitter.
+        contrast:    ColorJitter contrast factor — samples multiplier from
+                     [max(0, 1-c), 1+c]. 0.0 disables contrast jitter.
 
     Usage in training_step (after batch is on GPU):
         patches = self.augmentation(patches)
 
     Do NOT apply during validation — use kornia.geometry.transform.center_crop
-    or K.CenterCrop directly for a deterministic 283→200 crop.
+    or K.CenterCrop directly for a deterministic crop.
     """
 
-    def __init__(self, patch_size: int = 200, p_flip: float = 0.5) -> None:
+    def __init__(
+        self,
+        patch_size: int = 200,
+        p_flip: float = 0.5,
+        brightness: float = 0.0,
+        contrast: float = 0.0,
+    ) -> None:
         super().__init__()
-        self.augment = K.AugmentationSequential(
+        transforms = [
             # RandomAffine with rotation-only + zero padding (RandomRotation in
             # kornia 0.8 lacks padding_mode; RandomAffine has it)
             K.RandomAffine(
@@ -43,11 +58,24 @@ class PatchAugmentation(nn.Module):
             K.CenterCrop(patch_size),
             K.RandomHorizontalFlip(p=p_flip),
             K.RandomVerticalFlip(p=p_flip),
+        ]
+        if brightness > 0.0 or contrast > 0.0:
+            transforms.append(
+                K.ColorJitter(
+                    brightness=brightness,
+                    contrast=contrast,
+                    saturation=0.0,
+                    hue=0.0,
+                    p=1.0,
+                )
+            )
+        self.augment = K.AugmentationSequential(
+            *transforms,
             data_keys=["input"],
             same_on_batch=False,
         )
 
     @torch.no_grad()
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """x: (N, 1, 283, 283) on GPU → returns (N, 1, 200, 200) on GPU."""
+        """x: (N, 1, OVERSIZED, OVERSIZED) on GPU → returns (N, 1, patch_size, patch_size)."""
         return self.augment(x)

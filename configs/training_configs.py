@@ -427,6 +427,54 @@ CONFIGS = {
         "preload_device":       "cuda",
     },
 
+    # ── mpatch_v0 "_lite_aug" variants: lite + brightness/contrast jitter ────
+    # Identical to the corresponding _lite model but add ColorJitter after flips:
+    #   aug_brightness=0.15  → brightness multiplier ~ U(0.85, 1.15)
+    #   aug_contrast=0.20    → contrast multiplier  ~ U(0.80, 1.20)
+    # Applied only during training (validation uses plain center-crop, no jitter).
+
+    "mpatch_v0e_lite_aug": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v0e_lite_aug",
+        "model_dir":            "models/mpatch_v0e_lite_aug",
+        "lr":                   2e-3,
+        "head_type":            "ce",
+        "dropout":              0.3,
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         True,
+        "uniform_fraction":     0.10,
+        "scheduler_type":       "plateau",
+        "plateau_factor":       0.95,
+        "plateau_patience":     5,
+        "preload_device":       "cuda",
+        "aug_brightness":       0.15,
+        "aug_contrast":         0.20,
+    },
+
+    "mpatch_v0f_lite_aug": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v0f_lite_aug",
+        "model_dir":            "models/mpatch_v0f_lite_aug",
+        "lr":                   2e-3,
+        "head_type":            "ce",
+        "dropout":              0.3,
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         True,
+        "uniform_fraction":     0.00,
+        "scheduler_type":       "plateau",
+        "plateau_factor":       0.95,
+        "plateau_patience":     5,
+        "preload_device":       "cuda",
+        "aug_brightness":       0.15,
+        "aug_contrast":         0.20,
+    },
+
     # ── mpatch_v0_i: compile test ─────────────────────────────────────────────
     # Replicates mpatch_v0_d (CE head, exploratory+grid, uniform_fraction=0.20)
     # with force_compile=True to verify torch.compile works on the cluster.

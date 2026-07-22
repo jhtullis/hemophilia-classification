@@ -404,7 +404,11 @@ def main(
         _backend = cfg.get("compile_backend", "inductor")
         print(f"Compiling model with torch.compile (backend={_backend}) …")
         model = torch.compile(model, backend=_backend)
-    augmentation = PatchAugmentation(patch_size=_PATCH_SZ).to(device)
+    augmentation = PatchAugmentation(
+        patch_size=_PATCH_SZ,
+        brightness=cfg.get("aug_brightness", 0.0),
+        contrast=cfg.get("aug_contrast", 0.0),
+    ).to(device)
     center_crop = K.CenterCrop(_PATCH_SZ)
     class_weights = _compute_class_weights(train_df, device)
     if HEAD_TYPE == "ce":
@@ -487,6 +491,8 @@ def main(
         "epochs_per_job": epochs_per_job,
         "amp_enabled": gpu_cfg["amp_enabled"],
         "amp_dtype":   str(gpu_cfg["amp_dtype"]),
+        "aug_brightness": cfg.get("aug_brightness", 0.0),
+        "aug_contrast":   cfg.get("aug_contrast",   0.0),
         "variant": config_name,
     }
     if is_full_res:
