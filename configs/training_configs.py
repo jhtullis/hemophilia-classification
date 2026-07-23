@@ -694,4 +694,76 @@ CONFIGS = {
         "uniform_fraction":     0.10,
         "preload_device":       "cuda",
     },
+
+    # ── mpatch_v1e_125s family: 1.25x area-resize patch pipeline, 3 LR-schedule variants ──
+    # Images downscaled 1.25x via cv2.INTER_AREA resize (4800x3200) -- see
+    # masked_patch_dataset_125s.py / model_patch_125s.py for the shared dataset/model code.
+    # All three variants require an H200 (run on H200 partitions: eng, m13h, mgh) --
+    # the ~79.6GB GPU image preload is a property of the resolution, not the LR schedule,
+    # so this applies even to the plateau variant (unlike mpatch_v0e_lite's precedent).
+    # All three set topk_ensemble_save=True (mirrors mpatch_v0_f_ensw) for later ensembling.
+    # Verify actual peak GPU memory on first run before trusting batch_size=64
+    # (gpu_utils.py forces batch_size=64 on any SM>=9 GPU regardless of this config's value).
+
+    "mpatch_v1e_125s": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v1e_125s",
+        "model_dir":            "models/mpatch_v1e_125s",
+        "resolution_variant":   "1.25x",
+        "head_type":            "ce",
+        "T_mult":               1.5,          # geometrically-increasing restarts
+        "eta_min":              1e-4,
+        "dropout":              0.3,
+        "batch_size":           64,
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         True,
+        "uniform_fraction":     0.10,
+        "preload_device":       "cuda",
+        "topk_ensemble_save":   True,
+    },
+
+    "mpatch_v1e_125s_flat": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v1e_125s_flat",
+        "model_dir":            "models/mpatch_v1e_125s_flat",
+        "resolution_variant":   "1.25x",
+        "head_type":            "ce",
+        "T_mult":               1.0,          # flat, non-increasing 100-epoch restarts
+        "eta_min":              1e-4,
+        "dropout":              0.3,
+        "batch_size":           64,
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         True,
+        "uniform_fraction":     0.10,
+        "preload_device":       "cuda",
+        "topk_ensemble_save":   True,
+    },
+
+    "mpatch_v1e_125s_plateau": {
+        **_PATCH_V0_BASE,
+        "model_type":           "mpatch_v1e_125s_plateau",
+        "model_dir":            "models/mpatch_v1e_125s_plateau",
+        "resolution_variant":   "1.25x",
+        "lr":                   2e-3,         # 2x base LR, matches mpatch_v0e_lite's full paradigm
+        "head_type":            "ce",
+        "dropout":              0.3,
+        "batch_size":           64,
+        "mask_dir":             "masks",
+        "mask_version":         "v_intensity",
+        "patch_center_version": "p200_circle_v_intensity",
+        "mask_min_fg":          0.03,
+        "include_grid":         True,
+        "uniform_fraction":     0.10,
+        "scheduler_type":       "plateau",
+        "plateau_factor":       0.95,
+        "plateau_patience":     5,
+        "preload_device":       "cuda",
+        "topk_ensemble_save":   True,
+    },
 }

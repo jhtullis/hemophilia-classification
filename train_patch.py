@@ -52,7 +52,7 @@ from patch_dataset import (
     get_lc_train_df,
     make_patch_sampler,
 )
-from preprocessing import make_preprocessor
+from preprocessing import make_preprocessor, make_preprocessor_resized
 
 
 # ---------------------------------------------------------------------------
@@ -303,9 +303,10 @@ def main(
             model_dir=model_dir,
         )
 
-    is_2x_res   = cfg.get("resolution_variant") == "2x"
-    is_full_res = config_name.startswith("mpatch_v1_full") and not is_2x_res
-    is_masked   = config_name.startswith("mpatch_") and not is_full_res and not is_2x_res
+    is_2x_res    = cfg.get("resolution_variant") == "2x"
+    is_125s_res  = cfg.get("resolution_variant") == "1.25x"
+    is_full_res  = config_name.startswith("mpatch_v1_full") and not is_2x_res and not is_125s_res
+    is_masked    = config_name.startswith("mpatch_") and not is_full_res and not is_2x_res and not is_125s_res
 
     if is_full_res:
         from masked_patch_dataset_full import MaskedFullPatchDataset
@@ -387,6 +388,48 @@ def main(
         )
         train_sampler = train_ds.make_sampler()
 
+    elif is_125s_res:
+        from masked_patch_dataset_125s import MaskedPatch125sDataset
+
+        preprocessor = make_preprocessor_resized(pool_factor=1.25)
+        _MASK_DIR       = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                       cfg["mask_dir"])
+        _MASK_VERSION   = cfg["mask_version"]
+        _PC_VERSION     = cfg["patch_center_version"]
+        _INCLUDE_GRID   = cfg.get("include_grid", False)
+        _CSV_PATH       = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                       "data", "img-metadata.csv")
+
+        _UNIFORM_FRAC     = cfg.get("uniform_fraction",     0.20)
+        _VAL_UNIFORM_FRAC = cfg.get("val_uniform_fraction", 1.0)
+
+        # GPU preloading: store unpadded (1,3200,4800) uint8 tensors on device.
+        # Requires num_workers=0 — DataLoader workers are separate processes and cannot
+        # access CUDA tensors created in the main process.
+        _PRELOAD_DEVICE_STR = cfg.get("preload_device", None)
+        _PRELOAD_DEVICE = torch.device(_PRELOAD_DEVICE_STR) if _PRELOAD_DEVICE_STR else None
+
+        train_ds = MaskedPatch125sDataset(
+            train_df, photo_dir, preprocessor,
+            mask_dir=_MASK_DIR,
+            mask_version=_MASK_VERSION,
+            patch_center_version=_PC_VERSION,
+            include_grid=_INCLUDE_GRID,
+            csv_path=_CSV_PATH,
+            uniform_fraction=_UNIFORM_FRAC,
+            preload_device=_PRELOAD_DEVICE,
+        )
+        val_ds = MaskedPatch125sDataset(
+            val_df, photo_dir, preprocessor,
+            mask_dir=_MASK_DIR,
+            mask_version=_MASK_VERSION,
+            patch_center_version=_PC_VERSION,
+            include_grid=False,     # val always uses primary images only
+            uniform_fraction=_VAL_UNIFORM_FRAC,
+            preload_device=_PRELOAD_DEVICE,
+        )
+        train_sampler = train_ds.make_sampler()
+
     elif is_masked:
         preprocessor = make_preprocessor()
         from masked_patch_dataset import MaskedPatchDataset
@@ -445,7 +488,7 @@ def main(
         train_sampler = make_patch_sampler(train_ds)
     # GPU preloading requires num_workers=0: DataLoader workers are forked subprocesses
     # and cannot safely access CUDA tensors created in the main process.
-    _gpu_preload = (is_masked or is_2x_res) and cfg.get("preload_device") is not None
+    _gpu_preload = (is_masked or is_2x_res or is_125s_res) and cfg.get("preload_device") is not None
     _dl_workers  = 0     if _gpu_preload else num_workers
     _dl_pin      = False if _gpu_preload else True
     train_loader = DataLoader(
@@ -472,6 +515,12 @@ def main(
         _OVERSIZED = OVERSIZED_2X
         model = FibrinPatchCNN2x(num_classes=num_classes, dropout_p=DROPOUT_P,
                                  head_type=HEAD_TYPE).to(device)
+    elif is_125s_res:
+        from model_patch_125s import FibrinPatchCNN125s, PATCH_SIZE_125S, OVERSIZED_125S
+        _PATCH_SZ  = PATCH_SIZE_125S
+        _OVERSIZED = OVERSIZED_125S
+        model = FibrinPatchCNN125s(num_classes=num_classes, dropout_p=DROPOUT_P,
+                                   head_type=HEAD_TYPE).to(device)
     else:
         _PATCH_SZ  = PATCH_SIZE
         _OVERSIZED = OVERSIZED
@@ -573,7 +622,7 @@ def main(
         "head_type": HEAD_TYPE,
         "patch_size": _PATCH_SZ,
         "oversized": _OVERSIZED,
-        "patches_per_image": train_ds._total_patches if (is_masked or is_full_res or is_2x_res) else patches_per_image,
+        "patches_per_image": train_ds._total_patches if (is_masked or is_full_res or is_2x_res or is_125s_res) else patches_per_image,
         "num_classes": num_classes,
         "max_epochs": max_epochs,
         "epochs_per_job": epochs_per_job,
@@ -620,6 +669,19 @@ def main(
     elif is_2x_res:
         config.update({
             "dataset":              "masked_patch_2x",
+            "mask_version":         _MASK_VERSION,
+            "patch_center_version": _PC_VERSION,
+            "mask_min_fg":          cfg.get("mask_min_fg", 0.03),
+            "include_grid":         _INCLUDE_GRID,
+            "coverage_multiplier":       train_ds.coverage_multiplier,
+            "train_uniform_fraction":    train_ds.uniform_fraction,
+            "val_uniform_fraction":      val_ds.uniform_fraction,
+            "n_train_images":            len(train_ds._valid_row_positions),
+            "preload_device":            str(_PRELOAD_DEVICE) if _PRELOAD_DEVICE else None,
+        })
+    elif is_125s_res:
+        config.update({
+            "dataset":              "masked_patch_125s",
             "mask_version":         _MASK_VERSION,
             "patch_center_version": _PC_VERSION,
             "mask_min_fg":          cfg.get("mask_min_fg", 0.03),

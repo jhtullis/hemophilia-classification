@@ -71,6 +71,7 @@ def main():
             "mpatch_v1e_lite_lc20a", "mpatch_v1e_lite_lc25a", "mpatch_v1e_lite_lc30a",
             "mpatch_v1e_lite_lc35a",
             "mpatch_v1e_2xmp",
+            "mpatch_v1e_125s", "mpatch_v1e_125s_flat", "mpatch_v1e_125s_plateau",
         ],
         help="Which model to train.",
     )
@@ -162,6 +163,7 @@ def main():
         "mpatch_v1e_lite_lc20a", "mpatch_v1e_lite_lc25a", "mpatch_v1e_lite_lc30a",
         "mpatch_v1e_lite_lc35a",
         "mpatch_v1e_2xmp",
+        "mpatch_v1e_125s", "mpatch_v1e_125s_flat", "mpatch_v1e_125s_plateau",
     ):
         from train_patch import main as _train
         _train(**common, config_name=args.model_type)

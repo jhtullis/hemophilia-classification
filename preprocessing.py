@@ -107,6 +107,34 @@ def min_pool(img_gray: np.ndarray, factor: int = 10) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
+# Area-interpolation resize (approximate mean-pool, for non-integer factors)
+# ---------------------------------------------------------------------------
+
+def resize_pool(img_gray: np.ndarray, factor: float = 1.25) -> np.ndarray:
+    """Downsample a 2-D grayscale image via OpenCV area interpolation.
+
+    Unlike min_pool, this is an approximate area/mean pool (via cv2.INTER_AREA)
+    rather than an exact darkest-pixel block-min. Appropriate when factor does not
+    evenly divide H/W, or when a smoother, less dark-fiber-biased downsample is
+    desired. factor need not be an integer.
+
+    6000×4000 with factor=1.25 → 4800×3200 exactly (no cropping needed).
+
+    Args:
+        img_gray: 2-D uint8 array of shape (H, W).
+        factor:   Downsampling factor (default 1.25). new_h = round(H / factor),
+                  new_w = round(W / factor).
+
+    Returns:
+        2-D uint8 array of shape (round(H / factor), round(W / factor)).
+    """
+    h, w = img_gray.shape
+    new_h = round(h / factor)
+    new_w = round(w / factor)
+    return cv2.resize(img_gray, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+
+# ---------------------------------------------------------------------------
 # Full pipeline
 # ---------------------------------------------------------------------------
 
@@ -141,3 +169,40 @@ def make_preprocessor(gray_method: str = "lab_l",
         Callable: img_bgr -> torch.Tensor
     """
     return partial(preprocess, gray_method=gray_method, pool_factor=pool_factor)
+
+
+# ---------------------------------------------------------------------------
+# Full pipeline (area-interpolation variant)
+# ---------------------------------------------------------------------------
+
+def preprocess_resized(img_bgr: np.ndarray,
+                       gray_method: str = "lab_l",
+                       pool_factor: float = 1.25) -> torch.Tensor:
+    """Full preprocessing pipeline: grayscale → area-resize → normalize → tensor.
+
+    Args:
+        img_bgr:     H×W×3 uint8 BGR array (as returned by cv2.imread).
+        gray_method: Grayscale conversion method (see to_grayscale).
+        pool_factor: Area-resize downsampling factor (default 1.25).
+
+    Returns:
+        torch.Tensor of shape (1, round(H/pool_factor), round(W/pool_factor)),
+        dtype float32, values in [0, 1].
+    """
+    img_bgr = ensure_landscape(img_bgr)
+    gray = to_grayscale(img_bgr, method=gray_method)          # (H, W) uint8
+    pooled = resize_pool(gray, factor=pool_factor)             # (H/f, W/f) uint8
+    normalized = pooled.astype(np.float32) / 255.0            # [0, 1] float32
+    return torch.from_numpy(normalized).unsqueeze(0)           # (1, H/f, W/f)
+
+
+def make_preprocessor_resized(gray_method: str = "lab_l",
+                              pool_factor: float = 1.25):
+    """Return an area-resize preprocessing callable with fixed parameters.
+
+    Suitable for passing directly to FibrinDataset.
+
+    Returns:
+        Callable: img_bgr -> torch.Tensor
+    """
+    return partial(preprocess_resized, gray_method=gray_method, pool_factor=pool_factor)
