@@ -291,7 +291,19 @@ def main(
             shutil.copy2(src_record, dst_record)
             print(f"  Copied split record from {_SPLIT_SOURCE}")
 
-    train_df, val_df, _ = get_or_create_split(model_dir, db_path)
+    # Leave-one-experiment-out CV: rotate validation within a base model's already-fixed
+    # non-test pool. Reads the base model's train_record_patch.json directly rather than
+    # re-deriving a split, so the test set is guaranteed identical to the base model's.
+    _CV_FOLD_IDX = cfg.get("cv_fold_idx", None)
+    if _CV_FOLD_IDX is not None:
+        from patch_dataset import get_or_create_kfold_split
+        _CV_BASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    cfg.get("cv_base_model_dir", "models/mpatch_v1e_125s"))
+        train_df, val_df, _ = get_or_create_kfold_split(
+            model_dir, db_path, fold_idx=_CV_FOLD_IDX, base_model_dir=_CV_BASE_DIR,
+        )
+    else:
+        train_df, val_df, _ = get_or_create_split(model_dir, db_path)
 
     # LC experiment subsetting: applied on top of standard split (val_df is never touched).
     _LC_N_PER_CLASS = cfg.get("lc_n_per_class", None)

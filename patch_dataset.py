@@ -154,6 +154,105 @@ def get_or_create_split(
 
 
 # ---------------------------------------------------------------------------
+# Leave-one-experiment-out cross-validation folds
+# ---------------------------------------------------------------------------
+
+def split_by_experiment_kfold(
+    df: pd.DataFrame,
+    fold_idx: int,
+    base_model_dir: str,
+    db_path: str,
+    n_train: int = 7,
+    n_val: int = 1,
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Leave-one-experiment-out CV fold, rotating validation within base_model_dir's
+    already-materialized non-test pool.
+
+    Reads base_model_dir's saved train_record_patch.json (via load_split_record) to get
+    its ACTUAL train/val/test experiments per class -- no re-shuffling, no RNG. The test
+    set is copied through unchanged, guaranteeing byte-identical test experiments
+    regardless of environment. fold_idx selects a different pool experiment (per class)
+    as validation, deterministically (sorted order among the 7 candidates that exclude
+    the base model's own validation experiment -- fold 0 is reserved for base_model_dir
+    itself and is not selectable here).
+
+    Args:
+        df:             Metadata DataFrame from load_metadata() -- the full image set.
+        fold_idx:       1..n_train+n_val-1 (i.e. 1..7 for n_train=7, n_val=1).
+        base_model_dir: Directory holding the already-trained/training base model's
+                        train_record_patch.json (e.g. "models/mpatch_v1e_125s").
+        db_path:        Passed through to load_split_record for base-split reconstruction.
+    """
+    base_train_df, base_val_df, base_test_df = load_split_record(base_model_dir, db_path)
+
+    n_folds = n_train + n_val   # 8: size of the non-test pool per class
+    if not (1 <= fold_idx < n_folds):
+        raise ValueError(
+            f"fold_idx must be in [1, {n_folds}) -- fold 0 is reserved for "
+            f"{base_model_dir}'s own split, got {fold_idx}"
+        )
+
+    train_rows, val_rows, test_rows = [], [], []
+    for cls in CLASS_MAP:
+        base_train_exps = set(base_train_df[base_train_df["Exp_Type"] == cls]["Experiment"])
+        base_val_exps   = set(base_val_df[base_val_df["Exp_Type"] == cls]["Experiment"])
+        base_test_exps  = set(base_test_df[base_test_df["Exp_Type"] == cls]["Experiment"])
+        assert len(base_train_exps) == n_train and len(base_val_exps) == n_val, (
+            f"Unexpected base split shape for class {cls}: "
+            f"{len(base_train_exps)} train / {len(base_val_exps)} val "
+            f"(expected {n_train}/{n_val}) -- check {base_model_dir}/train_record_patch.json"
+        )
+
+        pool = base_train_exps | base_val_exps               # 8 experiments/class
+        rotation_candidates = sorted(pool - base_val_exps)   # 7 candidates, excludes fold 0
+        val_exp = rotation_candidates[fold_idx - 1]
+        train_exps = pool - {val_exp}
+
+        cls_df = df[df["Exp_Type"] == cls]
+        train_rows.append(cls_df[cls_df["Experiment"].isin(train_exps)])
+        val_rows.append(cls_df[cls_df["Experiment"] == val_exp])
+        test_rows.append(cls_df[cls_df["Experiment"].isin(base_test_exps)])
+
+    return (
+        pd.concat(train_rows).reset_index(drop=True),
+        pd.concat(val_rows).reset_index(drop=True),
+        pd.concat(test_rows).reset_index(drop=True),
+    )
+
+
+def get_or_create_kfold_split(
+    model_dir: str,
+    db_path: str,
+    fold_idx: int,
+    base_model_dir: str = "models/mpatch_v1e_125s",
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Load split from record if it exists; otherwise create and save it via
+    split_by_experiment_kfold. Mirrors get_or_create_split's caching behavior."""
+    record_path = os.path.join(model_dir, "train_record_patch.json")
+    if os.path.exists(record_path):
+        print(f"Loading split from {record_path}")
+        return load_split_record(model_dir, db_path)
+
+    base_record_path = os.path.join(base_model_dir, "train_record_patch.json")
+    if not os.path.exists(base_record_path):
+        raise FileNotFoundError(
+            f"Base split record not found: {base_record_path}\n"
+            f"Train {base_model_dir} at least one epoch before launching CV replicates."
+        )
+
+    engine = get_engine(db_path)
+    df = load_metadata(engine)
+    train_df, val_df, test_df = split_by_experiment_kfold(
+        df, fold_idx=fold_idx, base_model_dir=base_model_dir, db_path=db_path,
+    )
+    save_split_record(
+        model_dir, train_df, val_df, test_df,
+        seed=f"kfold_fold{fold_idx}_of_{base_model_dir}",
+    )
+    return train_df, val_df, test_df
+
+
+# ---------------------------------------------------------------------------
 # Dataset
 # ---------------------------------------------------------------------------
 

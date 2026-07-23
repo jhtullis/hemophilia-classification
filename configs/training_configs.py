@@ -61,6 +61,28 @@ _MPATCH_V1E_LITE_LC_BASE = {
     "early_stop_threshold": 1e-4,
 }
 
+# Hyperparameters duplicated verbatim from the mpatch_v1e_125s CONFIGS entry (not
+# derived from it -- mpatch_v1e_125s is already training on HPC and must not be
+# touched, per CLAUDE.md). Used only by the mpatch_v1e_125s_rep_{a..g} CV replicates.
+_MPATCH_V1E_125S_REP_BASE = {
+    **_PATCH_V0_BASE,
+    "resolution_variant":   "1.25x",
+    "head_type":            "ce",
+    "T_mult":               1.5,
+    "eta_min":              1e-4,
+    "dropout":              0.3,
+    "batch_size":           64,
+    "mask_dir":             "masks",
+    "mask_version":         "v_intensity",
+    "patch_center_version": "p200_circle_v_intensity",
+    "mask_min_fg":          0.03,
+    "include_grid":         True,
+    "uniform_fraction":     0.10,
+    "preload_device":       "cuda",
+    "topk_ensemble_save":   True,
+    "cv_base_model_dir":    "models/mpatch_v1e_125s",
+}
+
 # ── 5class_hpc variants ───────────────────────────────────────────────────────
 
 CONFIGS = {
@@ -838,5 +860,64 @@ CONFIGS = {
         "plateau_patience":     5,
         "preload_device":       "cuda",
         "topk_ensemble_save":   True,
+    },
+
+    # ── mpatch_v1e_125s_rep_{a..g}: leave-one-experiment-out CV replicates ───────────
+    # Each holds out a different single experiment/class as validation (rotating within
+    # mpatch_v1e_125s's already-fixed 8-experiment/class non-test pool -- see
+    # patch_dataset.split_by_experiment_kfold), trains on the other 7, and shares the
+    # EXACT SAME test set as mpatch_v1e_125s by construction (read directly from its
+    # train_record_patch.json, not re-derived). Hyperparameters duplicated from
+    # mpatch_v1e_125s verbatim -- mpatch_v1e_125s itself is untouched (already training
+    # on HPC; do not modify per CLAUDE.md). topk_ensemble_save=True on all 7 (mirrors
+    # mpatch_v0_f_ensw) for later ensembling across folds.
+
+    "mpatch_v1e_125s_rep_a": {
+        **_MPATCH_V1E_125S_REP_BASE,
+        "model_type":  "mpatch_v1e_125s_rep_a",
+        "model_dir":   "models/mpatch_v1e_125s_rep_a",
+        "cv_fold_idx": 1,
+    },
+
+    "mpatch_v1e_125s_rep_b": {
+        **_MPATCH_V1E_125S_REP_BASE,
+        "model_type":  "mpatch_v1e_125s_rep_b",
+        "model_dir":   "models/mpatch_v1e_125s_rep_b",
+        "cv_fold_idx": 2,
+    },
+
+    "mpatch_v1e_125s_rep_c": {
+        **_MPATCH_V1E_125S_REP_BASE,
+        "model_type":  "mpatch_v1e_125s_rep_c",
+        "model_dir":   "models/mpatch_v1e_125s_rep_c",
+        "cv_fold_idx": 3,
+    },
+
+    "mpatch_v1e_125s_rep_d": {
+        **_MPATCH_V1E_125S_REP_BASE,
+        "model_type":  "mpatch_v1e_125s_rep_d",
+        "model_dir":   "models/mpatch_v1e_125s_rep_d",
+        "cv_fold_idx": 4,
+    },
+
+    "mpatch_v1e_125s_rep_e": {
+        **_MPATCH_V1E_125S_REP_BASE,
+        "model_type":  "mpatch_v1e_125s_rep_e",
+        "model_dir":   "models/mpatch_v1e_125s_rep_e",
+        "cv_fold_idx": 5,
+    },
+
+    "mpatch_v1e_125s_rep_f": {
+        **_MPATCH_V1E_125S_REP_BASE,
+        "model_type":  "mpatch_v1e_125s_rep_f",
+        "model_dir":   "models/mpatch_v1e_125s_rep_f",
+        "cv_fold_idx": 6,
+    },
+
+    "mpatch_v1e_125s_rep_g": {
+        **_MPATCH_V1E_125S_REP_BASE,
+        "model_type":  "mpatch_v1e_125s_rep_g",
+        "model_dir":   "models/mpatch_v1e_125s_rep_g",
+        "cv_fold_idx": 7,
     },
 }
