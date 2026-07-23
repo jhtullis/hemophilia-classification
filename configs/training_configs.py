@@ -36,7 +36,8 @@ _PATCH_V0_BASE = {
 }
 
 _MPATCH_V1E_LITE_LC_BASE = {
-    **_PATCH_V0_BASE,           # batch_size=64, weight_decay=1e-3, etc.
+    **_PATCH_V0_BASE,
+    "batch_size":           32,     # fixed at P100 cap for consistency across GPU types
     "lr":                   2e-3,
     "head_type":            "ce",
     "dropout":              0.3,
