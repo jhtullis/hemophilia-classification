@@ -57,12 +57,47 @@ def inference_grid_centers(
     ]
 
 
+def score_patch_grid(
+    model: nn.Module,
+    padded_tensor: torch.Tensor,
+    centers: List[Tuple[int, int]],
+    device: torch.device,
+    center_crop: nn.Module,
+    pad: int = PAD,
+    oversized: int = OVERSIZED,
+) -> torch.Tensor:
+    """Raw (unaveraged) per-patch model outputs over the inference grid.
+
+    Returns:
+        scores: (num_patches, num_classes) — one row of raw model outputs
+        (cosine similarities or CE logits) per grid center in `centers`.
+    """
+    scores: list[torch.Tensor] = []
+    half = oversized // 2
+
+    model.eval()
+    with torch.no_grad():
+        for cy, cx in centers:
+            cy_pad = cy + pad
+            cx_pad = cx + pad
+            patch = padded_tensor[
+                :, cy_pad - half : cy_pad + half + 1,
+                   cx_pad - half : cx_pad + half + 1,
+            ]
+            patch = center_crop(patch.unsqueeze(0).to(device))
+            scores.append(model(patch).squeeze(0).cpu())
+
+    return torch.stack(scores)   # (num_patches, num_classes)
+
+
 def predict_image(
     model: nn.Module,
     padded_tensor: torch.Tensor,
     centers: List[Tuple[int, int]],
     device: torch.device,
     center_crop: nn.Module,
+    pad: int = PAD,
+    oversized: int = OVERSIZED,
 ) -> Tuple[int, torch.Tensor]:
     """Soft-vote prediction over the inference grid.
 
@@ -74,22 +109,9 @@ def predict_image(
     Returns:
         (predicted_class_index, mean_scores)   — mean_scores: (num_classes,)
     """
-    scores: list[torch.Tensor] = []
-    half = OVERSIZED // 2
-
-    model.eval()
-    with torch.no_grad():
-        for cy, cx in centers:
-            cy_pad = cy + PAD
-            cx_pad = cx + PAD
-            patch = padded_tensor[
-                :, cy_pad - half : cy_pad + half + 1,
-                   cx_pad - half : cx_pad + half + 1,
-            ]
-            patch = center_crop(patch.unsqueeze(0).to(device))
-            scores.append(model(patch).squeeze(0).cpu())
-
-    mean_scores = torch.stack(scores).mean(dim=0)   # (num_classes,)
+    scores = score_patch_grid(model, padded_tensor, centers, device, center_crop,
+                               pad=pad, oversized=oversized)
+    mean_scores = scores.mean(dim=0)   # (num_classes,)
     return mean_scores.argmax().item(), mean_scores
 
 
