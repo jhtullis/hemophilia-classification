@@ -420,6 +420,11 @@ nothing about the 125s grid or the 8-fold ensembling semantics.
 Single, non-resubmitting runs (evaluation doesn't need training's `USR1`-trap/resume machinery).
 `slurm/submit_holdout_eval.sh` submits both eval jobs and chains
 `slurm/eval_mpatch_v1e_lite_lc_aggregate.sh` after the lite_lc job via `--dependency=afterok`.
+**Neither eval job pins a GPU partition** (unlike `mpatch_v1e_125s*` training, which requires
+H200 for `preload_device`'s ~80GB training-image cache) — eval never preloads anything, it
+processes one holdout image at a time, so P100/V100/A100/H100/H200 are all fine; `gpu_utils.py`'s
+runtime detection adapts automatically. `slurm/eval_mpatch_v1e_125s_ensemble.sh` requests `mem=12G`
+(vs. training's 40G) accordingly.
 
 ---
 
