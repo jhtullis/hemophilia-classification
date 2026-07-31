@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=12G
 #SBATCH --gres=gpu:1
-#SBATCH --time=04:00:00
+#SBATCH --time=00:40:00
 #SBATCH --output=slurm/logs/fibrin_eval_mpatch_v1e_125s_ensemble_%j.out
 #SBATCH --error=slurm/logs/fibrin_eval_mpatch_v1e_125s_ensemble_%j.err
 #SBATCH --mail-type=FAIL,END
