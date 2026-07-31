@@ -5,7 +5,20 @@ __pycache__
 old
 test_output/
 .pytest_cache/
-models/
+models/*
+# Holdout-eval outputs are tracked so they can be committed on HPC and pulled
+# down for local analysis, without pulling in the (large, unwanted) training
+# checkpoints that otherwise live in the same model directories.
+!models/mpatch_v1e_125s_ensemble/
+models/mpatch_v1e_125s_ensemble/*
+!models/mpatch_v1e_125s_ensemble/holdout_eval/
+
+!models/mpatch_v1e_lite_lc[0-9][0-9][a-d]/
+models/mpatch_v1e_lite_lc[0-9][0-9][a-d]/*
+!models/mpatch_v1e_lite_lc[0-9][0-9][a-d]/holdout_eval/
+
+!models/mpatch_v1e_lite_lc_learning_curve/
+
 models/*/analysis/gradcam/misclassified/
 models/*/analysis/gradcam/all_overlays/
 models/*/analysis/gradcam/gradcam_summary.txt
