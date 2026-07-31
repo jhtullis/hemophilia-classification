@@ -1,0 +1,113 @@
+{
+  "n_test_images": 200,
+  "n_grid_patches_per_image": 15,
+  "ensemble": {
+    "image_accuracy": 0.825,
+    "image_loss": 1.3495601415634155,
+    "image_accuracy_per_class": {
+      "AC3": 0.775,
+      "F08D": 0.7,
+      "F09D": 1.0,
+      "F11D": 0.65,
+      "NC1": 1.0
+    },
+    "image_loss_per_class": {
+      "AC3": 3.0178894996643066,
+      "F08D": 1.7885215282440186,
+      "F09D": 3.278253046801183e-08,
+      "F11D": 1.941388487815857,
+      "NC1": 2.0861616434331154e-08
+    },
+    "patch_accuracy": 0.8273333333333334,
+    "patch_loss": 1.662505865097046,
+    "patch_accuracy_per_class": {
+      "AC3": 0.755,
+      "F08D": 0.705,
+      "F09D": 0.9966666666666667,
+      "F11D": 0.68,
+      "NC1": 1.0
+    },
+    "patch_loss_per_class": {
+      "AC3": 3.4287149906158447,
+      "F08D": 2.3421504497528076,
+      "F09D": 0.009342825040221214,
+      "F11D": 2.53230881690979,
+      "NC1": 1.1619010365393478e-05
+    }
+  },
+  "solo_models_note": "Per-fold raw scores weren't saved during the HPC run (only pred_label/correct per fold), so solo-model loss can't be recomputed locally -- accuracy only. Re-run evaluate_holdout_125s_ensemble.py with per-fold score columns added if solo loss is needed.",
+  "solo_models": [
+    {
+      "model_key": "mpatch_v1e_125s",
+      "image_accuracy": 0.89,
+      "image_loss": null,
+      "patch_accuracy": null,
+      "patch_loss": null,
+      "best_epoch": 636,
+      "best_val_acc": 0.855833
+    },
+    {
+      "model_key": "mpatch_v1e_125s_rep_a",
+      "image_accuracy": 0.865,
+      "image_loss": null,
+      "patch_accuracy": null,
+      "patch_loss": null,
+      "best_epoch": 267,
+      "best_val_acc": 0.84
+    },
+    {
+      "model_key": "mpatch_v1e_125s_rep_b",
+      "image_accuracy": 0.9,
+      "image_loss": null,
+      "patch_accuracy": null,
+      "patch_loss": null,
+      "best_epoch": 68,
+      "best_val_acc": 0.8825
+    },
+    {
+      "model_key": "mpatch_v1e_125s_rep_c",
+      "image_accuracy": 0.85,
+      "image_loss": null,
+      "patch_accuracy": null,
+      "patch_loss": null,
+      "best_epoch": 335,
+      "best_val_acc": 0.809167
+    },
+    {
+      "model_key": "mpatch_v1e_125s_rep_d",
+      "image_accuracy": 0.775,
+      "image_loss": null,
+      "patch_accuracy": null,
+      "patch_loss": null,
+      "best_epoch": 143,
+      "best_val_acc": 0.719167
+    },
+    {
+      "model_key": "mpatch_v1e_125s_rep_e",
+      "image_accuracy": 0.8,
+      "image_loss": null,
+      "patch_accuracy": null,
+      "patch_loss": null,
+      "best_epoch": 1794,
+      "best_val_acc": 0.7625
+    },
+    {
+      "model_key": "mpatch_v1e_125s_rep_f",
+      "image_accuracy": 0.71,
+      "image_loss": null,
+      "patch_accuracy": null,
+      "patch_loss": null,
+      "best_epoch": 1859,
+      "best_val_acc": 0.784167
+    },
+    {
+      "model_key": "mpatch_v1e_125s_rep_g",
+      "image_accuracy": 0.75,
+      "image_loss": null,
+      "patch_accuracy": null,
+      "patch_loss": null,
+      "best_epoch": 1392,
+      "best_val_acc": 0.7
+    }
+  ]
+}

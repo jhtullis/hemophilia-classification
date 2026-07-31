@@ -117,6 +117,10 @@ evaluate_holdout_lite_lc.py        Batched holdout eval of all 28 mpatch_v1e_lit
                                    models over their one shared holdout set
 aggregate_learning_curve.py        Aggregates the 28 lite_lc holdout summaries into a
                                    learning-curve CSV/JSON/plot
+analyze_holdout_results.py         Local analysis of pulled holdout-eval outputs — computes
+                                   accuracy + cross-entropy loss (loss recomputed from raw
+                                   score_<class> logit columns, not saved by the eval scripts
+                                   themselves) → analysis/ at repo root, no HPC needed
 
 # Analysis scripts
 run_analysis.py              Orchestrates all 11 analysis steps
@@ -204,6 +208,10 @@ models/mpatch_v1e_lite_lc{05..35}{a,b,c,d}/  28 learning-curve models (see LC se
 models/mpatch_v1e_125s_ensemble/holdout_eval/   8-fold ensemble holdout results + copied weights
 models/mpatch_v1e_lite_lc*/holdout_eval/        Per-LC-model holdout results + copied weights
 models/mpatch_v1e_lite_lc_learning_curve/       Aggregated learning-curve CSV/JSON/plot
+
+# Local analysis of pulled holdout-eval results (repo root, see analyze_holdout_results.py)
+analysis/125s_ensemble/      125s ensemble accuracy+loss summary (image & patch level)
+analysis/learning_curve/     lite_lc learning-curve accuracy+loss summary, CSV/JSON/plots
 
 test_output/                 Visual outputs from preprocessing/augmentation tests
 agent/                       Historical planning documents
@@ -424,6 +432,20 @@ it's safely re-runnable mid-progress) and writes
 `models/mpatch_v1e_lite_lc_learning_curve/learning_curve_summary.{csv,json}` +
 `learning_curve_combined.png` (patch- and image-accuracy vs. `lc_n_per_class`, 4 reps per size).
 
+### `analyze_holdout_results.py`
+Local, HPC-independent analysis of already-pulled holdout-eval outputs. Both eval scripts save raw
+`score_<class>` logits (all evaluated models use `head_type="ce"`) but never compute loss — this
+script recomputes cross-entropy loss (`F.cross_entropy` on the saved logits vs. `true_label`) from
+the existing CSVs, alongside a recomputed accuracy cross-check, for both image- and patch-level
+predictions. Writes to `analysis/` at the **repo root** (distinct from `models/.../holdout_eval/`):
+`analysis/125s_ensemble/summary.json`/`summary_table.csv` (ensemble image/patch accuracy+loss,
+per-class breakdown, plus each of the 8 solo folds' accuracy — solo-fold *loss* isn't recoverable
+since only the ensemble's raw per-row scores were persisted, not each fold's own) and
+`analysis/learning_curve/learning_curve_summary.{csv,json}` + two plots
+(`learning_curve_accuracy.png`, `learning_curve_loss.png`) aggregating all 28 lite_lc models'
+image/patch accuracy and loss vs. `lc_n_per_class`. Usage: `python analyze_holdout_results.py
+[--which {125s,lc,all}]`.
+
 ### Why the 125s family isn't in `analysis_utils.MODEL_REGISTRY`
 `FibrinPatchCNN125s` loading lives in `holdout_eval_utils.load_125s_model()` instead — registering
 it would silently expose the individual fold models (different geometry, different
@@ -569,3 +591,4 @@ green=63.2% > luminance=61.7% > lab_l=57.7% > hsv_v=57.2% > hsv_s=30.9%
 - BatchNorm eval mode: always call `model.eval()` before inference; `predict_all()` in `evaluate.py` does this defensively
 - `torch.compile` disabled by default on all GPU types — Triton requires `cuda.h` from `cuda-cudart-dev` conda package which is not installed; install with `CONDA_NO_PLUGINS=true conda install -c nvidia cuda-cudart-dev` then re-enable in `gpu_utils.py`
 - `is_full_res` routing in `train_patch.py` and `analysis_utils.py` uses `startswith("mpatch_v1_full")`, NOT `startswith("mpatch_v1")` — the latter would misroute all `mpatch_v1e_lite_lc*` models to FibrinPatchCNNFull
+- `evaluate_holdout_125s_ensemble.py`'s solo-fold accuracy loop used `image_df.rename(columns={f"pred_label_{key}": "pred_label", ...})` to reuse the ensemble's own `pred_label`/`correct` column names — but those columns already exist (the ensemble's), so the rename produced duplicate-labeled columns and `accuracy_breakdown` raised `TypeError` on `results_df["correct"].mean()` (a 2-column slice, not a Series). This crashed the actual HPC run immediately after `per_image_predictions.csv`/`per_patch_predictions.csv` were written but before `summary_table.csv`/`summary.json`/confusion matrices — fixed via column selection (`image_df[["Exp_Type"]].assign(correct=image_df[f"correct_{key}"])`) instead of rename; regression test in `test_holdout_eval.py::test_solo_fold_accuracy_column_selection_avoids_collision`. The lost outputs were fully recoverable locally from the two intact CSVs + `training_metadata.json` — no HPC re-run was needed.

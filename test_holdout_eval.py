@@ -247,6 +247,40 @@ def test_accuracy_breakdown():
     assert per_class["NC1"] == 1.0
 
 
+def test_solo_fold_accuracy_column_selection_avoids_collision():
+    """Regression test: evaluate_holdout_125s_ensemble.py's per_image_predictions.csv
+    has both an ensemble 'pred_label'/'correct' pair AND per-fold
+    'pred_label_<key>'/'correct_<key>' columns. Renaming a per-fold pair to
+    'pred_label'/'correct' collides with the existing ensemble columns,
+    producing duplicate-labeled columns -- results_df["correct"] then returns
+    a DataFrame instead of a Series and accuracy_breakdown's float() call
+    raises TypeError. This crashed the real HPC run partway through. The fix
+    is column selection (image_df[["Exp_Type"]].assign(correct=...)) instead
+    of rename -- verify it produces the correct accuracy without colliding."""
+    df = pd.DataFrame([
+        {"Exp_Type": "AC3", "pred_label": 0, "correct": 1,
+         "pred_label_fold_a": 1, "correct_fold_a": 0},
+        {"Exp_Type": "AC3", "pred_label": 0, "correct": 1,
+         "pred_label_fold_a": 0, "correct_fold_a": 1},
+        {"Exp_Type": "NC1", "pred_label": 4, "correct": 1,
+         "pred_label_fold_a": 4, "correct_fold_a": 1},
+    ])
+
+    solo_df = df[["Exp_Type"]].assign(correct=df["correct_fold_a"])
+    assert list(solo_df.columns) == ["Exp_Type", "correct"]
+    overall, per_class = accuracy_breakdown(solo_df, ["AC3", "NC1"])
+    assert abs(overall - (2 / 3)) < 1e-9
+    assert abs(per_class["AC3"] - 0.5) < 1e-9
+    assert per_class["NC1"] == 1.0
+
+    # Demonstrate the bug this guards against: the rename approach produces
+    # duplicate-labeled columns and accuracy_breakdown raises.
+    buggy_df = df.rename(columns={"pred_label_fold_a": "pred_label", "correct_fold_a": "correct"})
+    assert list(buggy_df.columns).count("correct") == 2
+    with pytest.raises(TypeError):
+        accuracy_breakdown(buggy_df, ["AC3", "NC1"])
+
+
 def test_write_json_roundtrip(tmp_path):
     path = str(tmp_path / "nested" / "out.json")
     write_json(path, {"a": 1, "b": [1, 2, 3]})

@@ -1,0 +1,10 @@
+model_key,image_accuracy,image_loss,patch_accuracy,patch_loss,best_epoch,best_val_acc
+ensemble,0.825,1.3495601415634155,0.8273333333333334,1.662505865097046,,
+mpatch_v1e_125s,0.89,,,,636.0,0.855833
+mpatch_v1e_125s_rep_a,0.865,,,,267.0,0.84
+mpatch_v1e_125s_rep_b,0.9,,,,68.0,0.8825
+mpatch_v1e_125s_rep_c,0.85,,,,335.0,0.809167
+mpatch_v1e_125s_rep_d,0.775,,,,143.0,0.719167
+mpatch_v1e_125s_rep_e,0.8,,,,1794.0,0.7625
+mpatch_v1e_125s_rep_f,0.71,,,,1859.0,0.784167
+mpatch_v1e_125s_rep_g,0.75,,,,1392.0,0.7

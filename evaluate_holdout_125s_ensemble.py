@@ -206,8 +206,7 @@ def evaluate(args: argparse.Namespace) -> None:
     })
 
     for key in present_keys:
-        solo_img_df = image_df.rename(columns={
-            f"pred_label_{key}": "pred_label", f"correct_{key}": "correct"})
+        solo_img_df = image_df[["Exp_Type"]].assign(correct=image_df[f"correct_{key}"])
         solo_img_acc, solo_img_per_class = accuracy_breakdown(solo_img_df, CLASS_NAMES)
 
         solo_patch_df = pd.DataFrame(solo_patch_rows[key])

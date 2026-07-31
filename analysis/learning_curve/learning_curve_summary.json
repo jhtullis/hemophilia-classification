@@ -1,0 +1,84 @@
+{
+  "n_models_found": 28,
+  "n_models_missing": 0,
+  "missing_models": [],
+  "per_size": {
+    "1": {
+      "n_reps": 4,
+      "image_accuracy_mean": 0.42125,
+      "image_accuracy_std": 0.03424787098005753,
+      "image_loss_mean": 6.643816888332367,
+      "image_loss_std": 4.2724571617664155,
+      "patch_accuracy_mean": 0.40241666666666664,
+      "patch_accuracy_std": 0.022660742689930943,
+      "patch_loss_mean": 7.1036616563797,
+      "patch_loss_std": 4.583247757854664
+    },
+    "2": {
+      "n_reps": 4,
+      "image_accuracy_mean": 0.51125,
+      "image_accuracy_std": 0.0955139605851766,
+      "image_loss_mean": 4.485957145690918,
+      "image_loss_std": 0.7577271424713337,
+      "patch_accuracy_mean": 0.4989166666666667,
+      "patch_accuracy_std": 0.10640675800036455,
+      "patch_loss_mean": 4.899210572242737,
+      "patch_loss_std": 0.7485073454678808
+    },
+    "3": {
+      "n_reps": 4,
+      "image_accuracy_mean": 0.645,
+      "image_accuracy_std": 0.05115336417740933,
+      "image_loss_mean": 3.1841989159584045,
+      "image_loss_std": 1.0760365934667904,
+      "patch_accuracy_mean": 0.6006666666666667,
+      "patch_accuracy_std": 0.03901376775029651,
+      "patch_loss_mean": 3.9856690764427185,
+      "patch_loss_std": 1.2097500856206196
+    },
+    "4": {
+      "n_reps": 4,
+      "image_accuracy_mean": 0.715,
+      "image_accuracy_std": 0.059301489582190635,
+      "image_loss_mean": 2.283395677804947,
+      "image_loss_std": 0.6205383262260771,
+      "patch_accuracy_mean": 0.6751666666666667,
+      "patch_accuracy_std": 0.049916597106239795,
+      "patch_loss_mean": 2.822200119495392,
+      "patch_loss_std": 0.6324712080646655
+    },
+    "5": {
+      "n_reps": 4,
+      "image_accuracy_mean": 0.69875,
+      "image_accuracy_std": 0.014930394055974074,
+      "image_loss_mean": 2.651142954826355,
+      "image_loss_std": 0.7927295215863888,
+      "patch_accuracy_mean": 0.66425,
+      "patch_accuracy_std": 0.01714507811891514,
+      "patch_loss_mean": 3.1160683631896973,
+      "patch_loss_std": 0.9089990450040235
+    },
+    "6": {
+      "n_reps": 4,
+      "image_accuracy_mean": 0.7262500000000001,
+      "image_accuracy_std": 0.04784959073318529,
+      "image_loss_mean": 2.2650223672389984,
+      "image_loss_std": 0.46231174310980266,
+      "patch_accuracy_mean": 0.6911666666666667,
+      "patch_accuracy_std": 0.04994849198776523,
+      "patch_loss_mean": 2.7482520937919617,
+      "patch_loss_std": 0.44697419729588317
+    },
+    "7": {
+      "n_reps": 4,
+      "image_accuracy_mean": 0.7275,
+      "image_accuracy_std": 0.0184842275106824,
+      "image_loss_mean": 2.4350502490997314,
+      "image_loss_std": 0.21015815541418686,
+      "patch_accuracy_mean": 0.6851666666666667,
+      "patch_accuracy_std": 0.01561219845956171,
+      "patch_loss_mean": 2.9829304218292236,
+      "patch_loss_std": 0.1816696142346908
+    }
+  }
+}
