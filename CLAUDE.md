@@ -103,7 +103,10 @@ evaluate.py                  Per-class precision/recall/F1, confusion matrix
 evaluate_cosine.py           Evaluation for cosine-head full-image models
 evaluate_patch.py            Patch cosine soft-vote grid inference;
                              score_patch_grid() returns raw per-patch scores,
-                             predict_image() wraps it with the mean+argmax step
+                             predict_image() wraps it with the mean+argmax step;
+                             inference_grid_centers(patch_size=...) opts into a
+                             border-free interior grid (used by holdout scripts only —
+                             this module's own CLI still uses the old 35-patch grid)
 
 # Holdout evaluation (reproducible testing, separate from training-time val/test)
 holdout_eval_utils.py            Shared helpers: 125s model loader, best-epoch/val-acc
@@ -380,8 +383,18 @@ dedicated `holdout_eval/` directory for reproducibility, and reports two accurac
 - **patch accuracy** — each grid patch's own argmax vs. the image's true label (no averaging)
 - **image accuracy** — soft-vote (mean over all grid patches) argmax vs. true label
 
-Both scripts use `evaluate_patch.score_patch_grid()` to get raw per-patch scores (35-patch grid,
-`inference_grid_centers()`), then average/argmax as needed per metric above.
+Both scripts use `evaluate_patch.score_patch_grid()` to get raw per-patch scores over a
+**border-free interior grid** — `inference_grid_centers(..., patch_size=<PATCH_SIZE>)` confines
+grid centers to `>= patch_size//2` px from every edge, so no patch's `CenterCrop` output ever reads
+into the `_pad_tensor` zero-padded border. For the standard 200×200/600×400 geometry this drops the
+grid from the old edge-inclusive 5×7=35 centers to 3×5=15 (stride=100 unchanged); the 1.25×-resize
+125s geometry scales identically to 15 centers (`H=3200, W=4800, stride=800, patch_size=1600`).
+Verified empirically: with the old edge-inclusive grid, 20/35 patches (the entire outer ring)
+included some zero-padding pixels; the border-free grid has zero. `inference_grid_centers()`'s
+`patch_size` param defaults to `None` (old edge-inclusive behavior) for backward compatibility —
+**`evaluate_patch.py`'s own standalone CLI (`evaluate()`) does not pass it and is unchanged, still
+using the 35-patch edge-inclusive grid**; only the two holdout scripts below opt into the
+border-free grid.
 
 ### `evaluate_holdout_125s_ensemble.py`
 Evaluates the complete 8-fold leave-one-experiment-out CV ensemble (`mpatch_v1e_125s` + `rep_a..g`
@@ -389,7 +402,7 @@ Evaluates the complete 8-fold leave-one-experiment-out CV ensemble (`mpatch_v1e_
 models share an identical `test_indices` holdout by construction (`split_by_experiment_kfold`
 copies the test set through unchanged); `holdout_eval_utils.assert_identical_test_split()` verifies
 this before evaluating and raises if it ever doesn't hold. For each holdout image, all 8 models
-score the same 1.25×-resize grid (`H=3200, W=4800, stride=800` — physically the same 35 locations
+score the same border-free 1.25×-resize grid (15 centers — physically the same interior locations
 as the 200×200/600×400 grid, scaled 8×); ensemble scores are the per-patch mean across all 8
 models. Reports both the ensemble's accuracy and each of the 8 solo models' own accuracy.
 Output: `models/mpatch_v1e_125s_ensemble/holdout_eval/` (`weights/` × 8, `training_metadata.json`,
@@ -401,8 +414,9 @@ Evaluates all 28 `mpatch_v1e_lite_lc*` models **separately** (no ensembling) aga
 shared holdout set (inherited from `mpatch_v0e_lite` via `split_source_dir`). The ~200 holdout
 images are decoded/preprocessed once and reused across all 28 model passes. Loads models via the
 existing `analysis_utils.load_model_from_registry` (already supports this family — standard
-600×400 geometry). Output per model: `models/<lc_key>/holdout_eval/` (kept separate from the
-`models/<lc_key>/analysis/test/` produced by a standalone `evaluate_patch.py` run).
+600×400 geometry, border-free 15-patch grid). Output per model: `models/<lc_key>/holdout_eval/`
+(kept separate from the `models/<lc_key>/analysis/test/` produced by a standalone
+`evaluate_patch.py` run — which still uses the old 35-patch edge-inclusive grid, see above).
 
 ### `aggregate_learning_curve.py`
 Reads all 28 `models/<lc_key>/holdout_eval/summary.json` files (skips + warns on any missing, so

@@ -8,6 +8,11 @@ All 28 models share an identical holdout test split (copied verbatim from
 mpatch_v0e_lite via split_source_dir at training time), so the ~200 test
 images are decoded/preprocessed once and reused across all 28 model passes.
 
+Patches are scored on a border-free interior grid (3 rows x 5 cols = 15
+centers, stride=100, each kept >= PATCH_SIZE//2 from every edge) rather
+than the 35-center edge-inclusive grid evaluate_patch.py uses elsewhere --
+no patch here reads into the zero-padded border.
+
 For each model, two accuracy metrics are reported:
     - patch accuracy:  each grid patch's own argmax vs. the image's true label
     - image accuracy:  soft-vote (mean over all patches) argmax vs. true label
@@ -74,7 +79,7 @@ def evaluate(args: argparse.Namespace) -> None:
     print(f"Evaluating {len(present_keys)} models on {args.split} set: {len(eval_df)} images")
 
     preprocessor = make_preprocessor()
-    centers = inference_grid_centers()
+    centers = inference_grid_centers(patch_size=PATCH_SIZE)
     center_crop = K.CenterCrop(PATCH_SIZE)
     photo_dir = args.photo_dir or os.path.join(_DIR, "data", "photos")
 

@@ -42,19 +42,31 @@ _DIR = os.path.dirname(os.path.abspath(__file__))
 # ---------------------------------------------------------------------------
 
 def inference_grid_centers(
-    H: int = 400, W: int = 600, stride: int = 100
+    H: int = 400, W: int = 600, stride: int = 100, patch_size: int | None = None
 ) -> List[Tuple[int, int]]:
     """Center-anchored grid from (0,0) to (H,W) inclusive at given stride.
 
     For H=400, W=600, stride=100: 5 rows × 7 cols = 35 centers.
     Edge centers are included so that boundary pixels sit at the center of
     the receptive field rather than its periphery.
+
+    If `patch_size` is given, centers are instead confined to the region
+    where a patch_size×patch_size crop lies entirely within the real image
+    -- i.e. at least patch_size//2 px from every edge -- so no patch reads
+    into the zero-padded border. This drops the edge-touching centers above
+    rather than repositioning them, so the grid comes out sparser at
+    whatever count the geometry yields (e.g. 3 rows × 5 cols = 15 centers
+    for the H=400, W=600, stride=100, patch_size=200 case) rather than a
+    fixed target count.
     """
-    return [
-        (cy, cx)
-        for cy in range(0, H + 1, stride)
-        for cx in range(0, W + 1, stride)
-    ]
+    if patch_size is None:
+        ys = range(0, H + 1, stride)
+        xs = range(0, W + 1, stride)
+    else:
+        half = patch_size // 2
+        ys = range(half, H - half + 1, stride)
+        xs = range(half, W - half + 1, stride)
+    return [(cy, cx) for cy in ys for cx in xs]
 
 
 def score_patch_grid(

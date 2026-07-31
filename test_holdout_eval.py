@@ -49,6 +49,58 @@ def test_125s_grid_matches_scaled_standard_grid():
     )
 
 
+def test_border_free_grid_is_15_centers_both_geometries():
+    """The holdout eval scripts pass patch_size= to confine centers to the
+    interior (>= patch_size//2 from every edge) so no patch reads into the
+    zero-padded border -- this drops the edge-inclusive 35 down to 15."""
+    standard_centers = inference_grid_centers(H=400, W=600, stride=100, patch_size=PATCH_SIZE)
+    resized_centers = inference_grid_centers(H=3200, W=4800, stride=800, patch_size=PATCH_SIZE_125S)
+
+    assert len(standard_centers) == 15
+    assert len(resized_centers) == 15
+    scaled = [(cy * 8, cx * 8) for cy, cx in standard_centers]
+    assert sorted(scaled) == sorted(resized_centers), (
+        "125s border-free grid centers should be exactly the 8x-scaled standard "
+        "border-free grid centers"
+    )
+    half = PATCH_SIZE // 2
+    for cy, cx in standard_centers:
+        assert half <= cy <= 400 - half
+        assert half <= cx <= 600 - half
+
+
+def test_border_free_grid_never_touches_padding():
+    """Empirical check (not just geometry math): with an all-ones 'real image'
+    and zero-padding (matching _pad_tensor), every border-free-grid patch's
+    minimum pixel value must be 1.0 -- any 0.0 would mean padding leaked in.
+    The old edge-inclusive grid is expected to fail this (its outer ring of
+    patches do touch padding), confirming this test actually discriminates."""
+
+    class _MinPixelProbe(torch.nn.Module):
+        def forward(self, x):
+            return x.amin(dim=(1, 2, 3)).unsqueeze(1).repeat(1, 5)
+
+    real = torch.ones(1, 400, 600)
+    padded = _pad_tensor(real, PAD)
+    model = _MinPixelProbe()
+    device = torch.device("cpu")
+    center_crop = K.CenterCrop(PATCH_SIZE)
+
+    old_centers = inference_grid_centers()
+    new_centers = inference_grid_centers(patch_size=PATCH_SIZE)
+
+    old_scores = score_patch_grid(model, padded, old_centers, device, center_crop)
+    new_scores = score_patch_grid(model, padded, new_centers, device, center_crop)
+
+    assert (old_scores[:, 0] < 1.0).sum().item() > 0, (
+        "sanity check failed: expected the old edge-inclusive grid to include "
+        "some padding-touching patches"
+    )
+    assert (new_scores[:, 0] < 1.0).sum().item() == 0, (
+        "border-free grid patch touched zero-padding -- half=patch_size//2 margin is wrong"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Preprocessing / padding shapes
 # ---------------------------------------------------------------------------

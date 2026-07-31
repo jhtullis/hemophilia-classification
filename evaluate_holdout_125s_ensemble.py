@@ -3,10 +3,12 @@ evaluate_holdout_125s_ensemble.py — Holdout evaluation of the mpatch_v1e_125s
 8-fold leave-one-experiment-out CV ensemble (fold 0 = mpatch_v1e_125s, folds
 1-7 = mpatch_v1e_125s_rep_a..g).
 
-For each holdout image, all 8 fold models score the same 35-patch 1.25x-resize
-grid (physically identical grid locations to the 200x200/600x400 pipeline,
-scaled 8x). Two accuracy metrics are reported, both solo-per-model and
-ensembled (scores averaged across all 8 models):
+For each holdout image, all 8 fold models score the same 15-patch (3 rows x
+5 cols) border-free interior 1.25x-resize grid -- physically identical grid
+locations to the 200x200/600x400 pipeline's interior grid, scaled 8x, each
+center kept >= PATCH_SIZE_125S//2 from every edge so no patch reads into
+the zero-padded border. Two accuracy metrics are reported, both
+solo-per-model and ensembled (scores averaged across all 8 models):
     - patch accuracy:  each grid patch's own argmax vs. the image's true label
     - image accuracy:  soft-vote (mean over all patches) argmax vs. true label
 
@@ -117,7 +119,7 @@ def evaluate(args: argparse.Namespace) -> None:
                extract_split_record_subset(model_dirs[present_keys[0]]))
 
     preprocessor = make_preprocessor_resized(pool_factor=1.25)
-    centers = inference_grid_centers(H=3200, W=4800, stride=args.stride)
+    centers = inference_grid_centers(H=3200, W=4800, stride=args.stride, patch_size=PATCH_SIZE_125S)
     center_crop = K.CenterCrop(PATCH_SIZE_125S)
     photo_dir = args.photo_dir or os.path.join(_DIR, "data", "photos")
 
