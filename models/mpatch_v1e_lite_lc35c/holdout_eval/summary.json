@@ -1,0 +1,26 @@
+{
+  "model_key": "mpatch_v1e_lite_lc35c",
+  "lc_n_per_class": 7,
+  "lc_seed": 235,
+  "n_test_images": 200,
+  "n_grid_patches_per_image": 15,
+  "patch_accuracy": 0.6986666666666667,
+  "image_accuracy": 0.725,
+  "patch_accuracy_per_class": {
+    "AC3": 0.7583333333333333,
+    "F08D": 0.3933333333333333,
+    "F09D": 0.7116666666666667,
+    "F11D": 0.7283333333333334,
+    "NC1": 0.9016666666666666
+  },
+  "image_accuracy_per_class": {
+    "AC3": 0.775,
+    "F08D": 0.35,
+    "F09D": 0.825,
+    "F11D": 0.75,
+    "NC1": 0.925
+  },
+  "best_epoch": 373,
+  "best_val_acc": 0.73,
+  "source": "training_log_full.csv"
+}

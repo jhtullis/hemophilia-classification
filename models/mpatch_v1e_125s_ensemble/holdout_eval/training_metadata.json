@@ -1,0 +1,79 @@
+{
+  "family": "mpatch_v1e_125s_ensemble",
+  "generated_at": "2026-07-31T00:25:44.606899+00:00",
+  "shared_test_split_source": "models/mpatch_v1e_125s/train_record_patch.json",
+  "models": [
+    {
+      "fold_idx": 0,
+      "config_key": "mpatch_v1e_125s",
+      "model_dir": "models/mpatch_v1e_125s",
+      "weights_copied_to": "weights/mpatch_v1e_125s_best_model.pth",
+      "best_epoch": 636,
+      "best_val_acc": 0.855833,
+      "source": "training_log_full.csv"
+    },
+    {
+      "fold_idx": 1,
+      "config_key": "mpatch_v1e_125s_rep_a",
+      "model_dir": "models/mpatch_v1e_125s_rep_a",
+      "weights_copied_to": "weights/mpatch_v1e_125s_rep_a_best_model.pth",
+      "best_epoch": 267,
+      "best_val_acc": 0.84,
+      "source": "training_log_full.csv"
+    },
+    {
+      "fold_idx": 2,
+      "config_key": "mpatch_v1e_125s_rep_b",
+      "model_dir": "models/mpatch_v1e_125s_rep_b",
+      "weights_copied_to": "weights/mpatch_v1e_125s_rep_b_best_model.pth",
+      "best_epoch": 68,
+      "best_val_acc": 0.8825,
+      "source": "training_log_full.csv"
+    },
+    {
+      "fold_idx": 3,
+      "config_key": "mpatch_v1e_125s_rep_c",
+      "model_dir": "models/mpatch_v1e_125s_rep_c",
+      "weights_copied_to": "weights/mpatch_v1e_125s_rep_c_best_model.pth",
+      "best_epoch": 335,
+      "best_val_acc": 0.809167,
+      "source": "training_log_full.csv"
+    },
+    {
+      "fold_idx": 4,
+      "config_key": "mpatch_v1e_125s_rep_d",
+      "model_dir": "models/mpatch_v1e_125s_rep_d",
+      "weights_copied_to": "weights/mpatch_v1e_125s_rep_d_best_model.pth",
+      "best_epoch": 143,
+      "best_val_acc": 0.719167,
+      "source": "training_log_full.csv"
+    },
+    {
+      "fold_idx": 5,
+      "config_key": "mpatch_v1e_125s_rep_e",
+      "model_dir": "models/mpatch_v1e_125s_rep_e",
+      "weights_copied_to": "weights/mpatch_v1e_125s_rep_e_best_model.pth",
+      "best_epoch": 1794,
+      "best_val_acc": 0.7625,
+      "source": "training_log_full.csv"
+    },
+    {
+      "fold_idx": 6,
+      "config_key": "mpatch_v1e_125s_rep_f",
+      "model_dir": "models/mpatch_v1e_125s_rep_f",
+      "weights_copied_to": "weights/mpatch_v1e_125s_rep_f_best_model.pth",
+      "best_epoch": 1859,
+      "best_val_acc": 0.784167,
+      "source": "training_log_full.csv"
+    },
+    {
+      "fold_idx": 7,
+      "config_key": "mpatch_v1e_125s_rep_g",
+      "model_dir": "models/mpatch_v1e_125s_rep_g",
+      "weights_copied_to": "weights/mpatch_v1e_125s_rep_g_best_model.pth",
+      "best_epoch": 1392,
+      "best_val_acc": 0.7,
+      "source": "training_log_full.csv"
+    }
+  ]
+}

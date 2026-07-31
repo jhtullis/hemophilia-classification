@@ -1,0 +1,26 @@
+{
+  "model_key": "mpatch_v1e_lite_lc20c",
+  "lc_n_per_class": 4,
+  "lc_seed": 220,
+  "n_test_images": 200,
+  "n_grid_patches_per_image": 15,
+  "patch_accuracy": 0.7176666666666667,
+  "image_accuracy": 0.765,
+  "patch_accuracy_per_class": {
+    "AC3": 0.805,
+    "F08D": 0.4216666666666667,
+    "F09D": 0.765,
+    "F11D": 0.7816666666666666,
+    "NC1": 0.815
+  },
+  "image_accuracy_per_class": {
+    "AC3": 0.85,
+    "F08D": 0.4,
+    "F09D": 0.85,
+    "F11D": 0.875,
+    "NC1": 0.85
+  },
+  "best_epoch": 298,
+  "best_val_acc": 0.653333,
+  "source": "training_log_full.csv"
+}

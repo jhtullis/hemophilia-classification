@@ -1,0 +1,12 @@
+{
+  "config_key": "mpatch_v1e_lite_lc20c",
+  "model_dir": "models/mpatch_v1e_lite_lc20c",
+  "lc_n_per_class": 4,
+  "lc_seed": 220,
+  "split_source_dir": "models/mpatch_v0e_lite",
+  "weights_copied_to": "weights/mpatch_v1e_lite_lc20c_best_model.pth",
+  "generated_at": "2026-07-31T00:30:47.248566+00:00",
+  "best_epoch": 298,
+  "best_val_acc": 0.653333,
+  "source": "training_log_full.csv"
+}

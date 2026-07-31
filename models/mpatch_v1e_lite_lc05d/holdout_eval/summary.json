@@ -1,0 +1,26 @@
+{
+  "model_key": "mpatch_v1e_lite_lc05d",
+  "lc_n_per_class": 1,
+  "lc_seed": 305,
+  "n_test_images": 200,
+  "n_grid_patches_per_image": 15,
+  "patch_accuracy": 0.4083333333333333,
+  "image_accuracy": 0.435,
+  "patch_accuracy_per_class": {
+    "AC3": 0.265,
+    "F08D": 0.405,
+    "F09D": 0.13833333333333334,
+    "F11D": 0.29333333333333333,
+    "NC1": 0.94
+  },
+  "image_accuracy_per_class": {
+    "AC3": 0.3,
+    "F08D": 0.4,
+    "F09D": 0.15,
+    "F11D": 0.325,
+    "NC1": 1.0
+  },
+  "best_epoch": 54,
+  "best_val_acc": 0.56,
+  "source": "training_log_full.csv"
+}

@@ -1,0 +1,12 @@
+{
+  "config_key": "mpatch_v1e_lite_lc35c",
+  "model_dir": "models/mpatch_v1e_lite_lc35c",
+  "lc_n_per_class": 7,
+  "lc_seed": 235,
+  "split_source_dir": "models/mpatch_v0e_lite",
+  "weights_copied_to": "weights/mpatch_v1e_lite_lc35c_best_model.pth",
+  "generated_at": "2026-07-31T00:33:30.789904+00:00",
+  "best_epoch": 373,
+  "best_val_acc": 0.73,
+  "source": "training_log_full.csv"
+}

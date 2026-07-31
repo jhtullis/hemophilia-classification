@@ -1,0 +1,56 @@
+{
+  "n_models_found": 28,
+  "n_models_missing": 0,
+  "missing_models": [],
+  "per_size": {
+    "1": {
+      "patch_accuracy_mean": 0.40241666666666664,
+      "patch_accuracy_std": 0.022660742689930943,
+      "image_accuracy_mean": 0.42125,
+      "image_accuracy_std": 0.03424787098005753,
+      "n_reps": 4
+    },
+    "2": {
+      "patch_accuracy_mean": 0.4989166666666667,
+      "patch_accuracy_std": 0.10640675800036455,
+      "image_accuracy_mean": 0.51125,
+      "image_accuracy_std": 0.0955139605851766,
+      "n_reps": 4
+    },
+    "3": {
+      "patch_accuracy_mean": 0.6006666666666667,
+      "patch_accuracy_std": 0.03901376775029651,
+      "image_accuracy_mean": 0.645,
+      "image_accuracy_std": 0.05115336417740933,
+      "n_reps": 4
+    },
+    "4": {
+      "patch_accuracy_mean": 0.6751666666666667,
+      "patch_accuracy_std": 0.049916597106239795,
+      "image_accuracy_mean": 0.715,
+      "image_accuracy_std": 0.059301489582190635,
+      "n_reps": 4
+    },
+    "5": {
+      "patch_accuracy_mean": 0.66425,
+      "patch_accuracy_std": 0.01714507811891514,
+      "image_accuracy_mean": 0.69875,
+      "image_accuracy_std": 0.014930394055974074,
+      "n_reps": 4
+    },
+    "6": {
+      "patch_accuracy_mean": 0.6911666666666667,
+      "patch_accuracy_std": 0.04994849198776523,
+      "image_accuracy_mean": 0.7262500000000001,
+      "image_accuracy_std": 0.04784959073318529,
+      "n_reps": 4
+    },
+    "7": {
+      "patch_accuracy_mean": 0.6851666666666667,
+      "patch_accuracy_std": 0.01561219845956171,
+      "image_accuracy_mean": 0.7275,
+      "image_accuracy_std": 0.0184842275106824,
+      "n_reps": 4
+    }
+  }
+}
