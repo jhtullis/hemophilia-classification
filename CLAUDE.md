@@ -241,13 +241,15 @@ Linear(256→128) → ReLU → Dropout(0.5) → Linear(128→5)
 ### FibrinPatchCNN (patch-based, `model_patch.py`)
 ```
 Input: 1 × 200 × 200 (grayscale patch after rotation + crop)
-Block 1: Conv2d(1→32,  3×3, pad=1) → BN → ReLU → MaxPool(2×2)  → 32  × 100 × 100
-Block 2: Conv2d(32→64, 3×3, pad=1) → BN → ReLU → MaxPool(2×2)  → 64  ×  50 ×  50
-Block 3: Conv2d(64→128,3×3, pad=1) → BN → ReLU → MaxPool(2×2)  → 128 ×  25 ×  25
-Block 4: Conv2d(128→256,3×3,pad=1) → BN → ReLU → MaxPool(2×2)  → 256 ×  12 ×  12
+Block 1: Conv(1→32,   3×3) → BN → ReLU  Conv(32→32,  3×3) → BN → ReLU  Conv(32→32,  3×3, s=2) → BN → ReLU  → 32  × 100 × 100
+Block 2: Conv(32→64,  3×3) → BN → ReLU  Conv(64→64,  3×3) → BN → ReLU  Conv(64→64,  3×3, s=2) → BN → ReLU  → 64  ×  50 ×  50
+Block 3: Conv(64→128, 3×3) → BN → ReLU  Conv(128→128,3×3) → BN → ReLU  Conv(128→128,3×3, s=2) → BN → ReLU  → 128 ×  25 ×  25
+Conv4:   Conv(128→256,3×3) → BN → ReLU                                                                         → 256 ×  25 ×  25
 AdaptiveAvgPool2d(1,1) → 256
 Linear(256→128) → ReLU → Dropout(p) → Linear(128→5)
-~900K params. Cosine head variant: NormalizedLinear replaces final Linear.
+~900K params. No MaxPool — downsampling via stride-2 in the 3rd conv of each block.
+Receptive field: 59 px in 200 px patch space = 590 px in original image space.
+Cosine head variant: NormalizedLinear replaces final Linear.
 ```
 
 Resolution-specific variants (`model_patch_125s.py`, `model_patch_2x.py`, `model_patch_full.py`)
@@ -300,6 +302,10 @@ Kornia GPU module applied per-batch during training only. Validation always uses
 - Exactly 8 of 10 experiments per class used for training (80% train, 20% val)
 - Split saved to `train_record.json`; downstream scripts always load from this file
 - `WeightedRandomSampler` + `CrossEntropyLoss(weight=...)` for class imbalance
+- **No holdout set** — val split served dual duty for model selection and reported accuracy.
+  This includes `5class_hpc_v0/v1a/v1b/v1c`, which copy `models/5class/train_record.json`.
+  Grad-CAM analysis of these models revealed background bias (empty slide learned as a
+  spurious F09D feature), motivating the patch pipeline and the explicit test partition below.
 
 ### Patch models (3-way, `patch_dataset.py`)
 - `split_by_experiment_3way(seed=99)`: 7 train / 1 val / 2 test experiments per class
