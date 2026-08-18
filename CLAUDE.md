@@ -210,7 +210,8 @@ models/mpatch_v1e_lite_lc*/holdout_eval/        Per-LC-model holdout results + c
 models/mpatch_v1e_lite_lc_learning_curve/       Aggregated learning-curve CSV/JSON/plot
 
 # Local analysis of pulled holdout-eval results (repo root, see analyze_holdout_results.py)
-analysis/125s_ensemble/      125s ensemble accuracy+loss summary (image & patch level)
+analysis/125s_ensemble/      125s ensemble accuracy+loss summary (image & patch level) +
+                             confusion_matrices/ (ensemble image/patch + 8 solo folds, image-level)
 analysis/learning_curve/     lite_lc learning-curve accuracy+loss summary, CSV/JSON/plots
 
 test_output/                 Visual outputs from preprocessing/augmentation tests
@@ -440,11 +441,47 @@ the existing CSVs, alongside a recomputed accuracy cross-check, for both image- 
 predictions. Writes to `analysis/` at the **repo root** (distinct from `models/.../holdout_eval/`):
 `analysis/125s_ensemble/summary.json`/`summary_table.csv` (ensemble image/patch accuracy+loss,
 per-class breakdown, plus each of the 8 solo folds' accuracy — solo-fold *loss* isn't recoverable
-since only the ensemble's raw per-row scores were persisted, not each fold's own) and
-`analysis/learning_curve/learning_curve_summary.{csv,json}` + two plots
-(`learning_curve_accuracy.png`, `learning_curve_loss.png`) aggregating all 28 lite_lc models'
-image/patch accuracy and loss vs. `lc_n_per_class`. Usage: `python analyze_holdout_results.py
-[--which {125s,lc,all}]`.
+since only the ensemble's raw per-row scores were persisted, not each fold's own) plus
+`analysis/125s_ensemble/confusion_matrices/` (`final_model_image_classification.png`,
+`final_model_patch_classification.png`, `selected_model.png` — a presentation-facing variant of
+the image one, larger fonts + a spelled-out class-abbreviation key beside the colorbar, NC1/AC3/
+F08D/F09D/F11D row/column order — and one per solo fold, image-level only, since solo per-fold
+patch predictions weren't persisted either —
+via `misclassification_report.plot_confusion_matrix`: count + row-normalized-fraction style, cell
+color keyed to fraction (fixed 0–1 colorbar), cell text `"count\n(fraction)"` — chosen over the
+plain raw-count `Blues` style used elsewhere (`evaluate_patch.py`/`evaluate_cosine.py`/
+`evaluate_abmil.py`) after a side-by-side comparison. `plot_confusion_matrix` gained an optional
+`title` param (default preserves its original hardcoded title, so its one existing call site in
+`misclassification_report.py` is unaffected) so each of the 10 plots can carry its own model
+key), and `analysis/learning_curve/learning_curve_summary.{csv,json}` (per-model rows: one holdout
+evaluation pass per model, not a training/val epoch history) + a power-law scaling-curve suite
+over `dd` (total training experiments, `lc_n_per_class * 5`, i.e. 5..35) for each of the 4 metrics
+(`patch_accuracy`, `image_accuracy`, `patch_loss`, `image_loss`): `lc_basic_<metric>.png` +
+`lc_basic_<metric>_loglog.png` (scatter of all 4 replicates per `dd` + per-`dd` mean line), and
+`lc_powerlaw_<metric>.png` (log-log; fit `y = a·N^β + c` via `scipy.optimize.curve_fit`, bounds
+`a≥0, β≤0, c≥0`, falling back to the 2-param `y = a·N^β` if the 3-param fit doesn't converge;
+accuracy columns are fit in error space `1-acc` then converted back; shaded 95% band from a
+1000-iteration bootstrap that resamples each `dd`'s per-replicate values with replacement and
+refits) plus `lc_powerlaw_<metric>_linear.png` (linear-y version, accuracy metrics only) — 14 plot
+files total (loss metrics: 3 each; accuracy metrics: 4 each). Method adapted from a sibling
+scaling-law analysis originally written for per-epoch validation logs (Hestness et al. 2017, "Deep
+Learning Scaling is Predictable, Empirically", arXiv:1712.00409); here the "per-epoch history →
+summary stat" reduction step is skipped since each holdout-eval model already yields exactly one
+scalar per metric. `_extrapolation_grid()` spans `[dd_min, dd_max · 10**0.5]` — **no backward
+extrapolation** below the smallest observed `dd` (deliberately: a naive dense grid starting near 0
+was visually misleading, since the fit is unconstrained there), forward extrapolation capped at
+half an order of magnitude past the largest observed `dd` (`35 → ~111`). Each `lc_powerlaw_*.png`
+carries an in-plot stats box (fit order, R², RMSE, floor/ceiling 95% CI) and a dotted asymptote
+reference line at the **bootstrap median** floor/ceiling (not the central fit's own point
+estimate — with only 7 `dd` points and `c≥0` bounded, the central fit's `c` frequently pins near
+the boundary even when the bootstrap distribution is wide; the median tracks the percentiles shown
+in the stats box instead of that boundary artifact). `analysis/learning_curve/
+power_law_fit_report.{txt,json}` mirrors the same per-metric numbers computed once in
+`_analyze_metric()` (shared by the plot annotations and the report, not recomputed): central fit
+params, R²/RMSE, bootstrap convergence counts (3-param vs. 2-param-fallback vs. failed successes
+out of 1000), floor/ceiling bootstrap percentiles (2.5/25/50/75/97.5), and fitted-vs.-observed
+values at each training size plus extrapolated predictions (with bootstrap CI) at `dd_max ×
+{1.15, 1.5, 2.0, 10**0.5}`. Usage: `python analyze_holdout_results.py [--which {125s,lc,all}]`.
 
 ### Why the 125s family isn't in `analysis_utils.MODEL_REGISTRY`
 `FibrinPatchCNN125s` loading lives in `holdout_eval_utils.load_125s_model()` instead — registering

@@ -1,0 +1,86 @@
+Power-law scaling fit report -- mpatch_v1e_lite_lc holdout learning curve
+Source: analysis/learning_curve/learning_curve_summary.csv (28 models, one holdout-eval scalar per model per metric)
+Fit model: y = a * N^beta + c  (3-param; a>=0, beta<=0, c>=0), N = dd = total training experiments (lc_n_per_class * 5);
+  falls back to y = a * N^beta (2-param, no floor) if the 3-param fit doesn't converge. Accuracy metrics are fit in error space (1-accuracy) and converted back.
+Bootstrap: 1000 resamples (with replacement) of each dd's per-replicate values, refit each time; band/percentiles require >= 10 converged fits.
+Extrapolation shown/reported forward only, out to dd_max * 10^0.5 (half an order of magnitude past the largest observed dd); no backward extrapolation.
+
+=== patch_accuracy (Patch accuracy) ===
+Fit: 3-parameter (a=1.0981, beta=-0.3739, c=0.0045)
+Goodness of fit (observed per-dd means vs. fitted): R^2=0.9601  RMSE=0.0206
+Bootstrap convergence: 1000/1000 succeeded (1000 three-param, 0 two-param fallback, 0 failed)
+Asymptotic ceiling (N -> infinity), bootstrap percentiles (central fit: 0.9955):
+    2.5%: 0.7121   25%: 0.8306   50%: 0.9744   75%: 1.0000   97.5%: 1.0000
+Fitted vs. observed at training sizes:
+    dd=5    fitted=0.3940  observed_mean=0.4024
+    dd=10   fitted=0.5313  observed_mean=0.4989
+    dd=15   fitted=0.5966  observed_mean=0.6007
+    dd=20   fitted=0.6373  observed_mean=0.6752
+    dd=25   fitted=0.6660  observed_mean=0.6643
+    dd=30   fitted=0.6877  observed_mean=0.6912
+    dd=35   fitted=0.7049  observed_mean=0.6852
+Extrapolated predictions:
+    dd=40.2   (1.15x): 0.7197  [95% CI 0.6843-0.7309]
+    dd=52.5   (1.50x): 0.7458  [95% CI 0.6918-0.7576]
+    dd=70     (2.00x): 0.7713  [95% CI 0.6969-0.7841]
+    dd=110.7  (3.16x): 0.8066  [95% CI 0.7025-0.8204]
+
+=== image_accuracy (Image accuracy (soft-vote)) ===
+Fit: 3-parameter (a=1.1814, beta=-0.4293, c=0.0000)
+Goodness of fit (observed per-dd means vs. fitted): R^2=0.9459  RMSE=0.0261
+Bootstrap convergence: 1000/1000 succeeded (1000 three-param, 0 two-param fallback, 0 failed)
+Asymptotic ceiling (N -> infinity), bootstrap percentiles (central fit: 1.0000):
+    2.5%: 0.7745   25%: 0.9083   50%: 1.0000   75%: 1.0000   97.5%: 1.0000
+Fitted vs. observed at training sizes:
+    dd=5    fitted=0.4079  observed_mean=0.4213
+    dd=10   fitted=0.5603  observed_mean=0.5113
+    dd=15   fitted=0.6305  observed_mean=0.6450
+    dd=20   fitted=0.6735  observed_mean=0.7150
+    dd=25   fitted=0.7033  observed_mean=0.6987
+    dd=30   fitted=0.7256  observed_mean=0.7263
+    dd=35   fitted=0.7432  observed_mean=0.7275
+Extrapolated predictions:
+    dd=40.2   (1.15x): 0.7582  [95% CI 0.7306-0.7712]
+    dd=52.5   (1.50x): 0.7842  [95% CI 0.7428-0.7970]
+    dd=70     (2.00x): 0.8093  [95% CI 0.7514-0.8221]
+    dd=110.7  (3.16x): 0.8433  [95% CI 0.7601-0.8558]
+
+=== patch_loss (Patch loss) ===
+Fit: 3-parameter (a=21.1967, beta=-0.8335, c=1.6077)
+Goodness of fit (observed per-dd means vs. fitted): R^2=0.9713  RMSE=0.2494
+Bootstrap convergence: 1000/1000 succeeded (1000 three-param, 0 two-param fallback, 0 failed)
+Asymptotic floor (N -> infinity), bootstrap percentiles (central fit: 1.6077):
+    2.5%: 0.0000   25%: 0.0000   50%: 1.6589   75%: 2.2673   97.5%: 2.7464
+Fitted vs. observed at training sizes:
+    dd=5    fitted=7.1498  observed_mean=7.1037
+    dd=10   fitted=4.7181  observed_mean=4.8992
+    dd=15   fitted=3.8261  observed_mean=3.9857
+    dd=20   fitted=3.3531  observed_mean=2.8222
+    dd=25   fitted=3.0568  observed_mean=3.1161
+    dd=30   fitted=2.8525  observed_mean=2.7483
+    dd=35   fitted=2.7024  observed_mean=2.9829
+Extrapolated predictions:
+    dd=40.2   (1.15x): 2.5820  [95% CI 2.3512-3.0431]
+    dd=52.5   (1.50x): 2.3885  [95% CI 2.0907-2.9391]
+    dd=70     (2.00x): 2.2220  [95% CI 1.8210-2.8591]
+    dd=110.7  (3.16x): 2.0270  [95% CI 1.4700-2.7944]
+
+=== image_loss (Image loss (soft-vote)) ===
+Fit: 3-parameter (a=23.5504, beta=-0.9090, c=1.2536)
+Goodness of fit (observed per-dd means vs. fitted): R^2=0.9702  RMSE=0.2591
+Bootstrap convergence: 1000/1000 succeeded (1000 three-param, 0 two-param fallback, 0 failed)
+Asymptotic floor (N -> infinity), bootstrap percentiles (central fit: 1.2536):
+    2.5%: 0.0000   25%: 0.0000   50%: 1.2454   75%: 1.7617   97.5%: 2.2068
+Fitted vs. observed at training sizes:
+    dd=5    fitted=6.7063  observed_mean=6.6438
+    dd=10   fitted=4.1578  observed_mean=4.4860
+    dd=15   fitted=3.2624  observed_mean=3.1842
+    dd=20   fitted=2.8001  observed_mean=2.2834
+    dd=25   fitted=2.5161  observed_mean=2.6511
+    dd=30   fitted=2.3233  observed_mean=2.2650
+    dd=35   fitted=2.1834  observed_mean=2.4351
+Extrapolated predictions:
+    dd=40.2   (1.15x): 2.0725  [95% CI 1.8387-2.4673]
+    dd=52.5   (1.50x): 1.8967  [95% CI 1.6101-2.3751]
+    dd=70     (2.00x): 1.7487  [95% CI 1.3844-2.2890]
+    dd=110.7  (3.16x): 1.5801  [95% CI 1.0688-2.2316]

@@ -164,16 +164,38 @@ def plot_slide_type_comparison(results: pd.DataFrame, class_names: list,
 # Output D: Confusion matrix
 # ---------------------------------------------------------------------------
 
-def plot_confusion_matrix(results: pd.DataFrame, class_names: list,
-                          out_dir: str) -> None:
+def plot_confusion_matrix(
+    results: pd.DataFrame, class_names: list, out_dir: str,
+    title: str = "Confusion Matrix (count / fraction of true class)",
+    class_key: dict = None,
+    class_order: list = None,
+    cell_fontsize: float = 9,
+    tick_fontsize: float = 9,
+    label_fontsize: float = 11,
+    title_fontsize: float = 11,
+    key_fontsize: float = 9.5,
+) -> None:
+    """class_key: optional {abbreviation: full name} dict rendered as a horizontal
+    text key to the right of the colorbar (e.g. for a presentation-facing figure
+    where the class abbreviations need spelling out). class_order: optional
+    reordering of class_names for display (rows/cols of the matrix are permuted to
+    match; the underlying cm is always computed in class_names' original label-index
+    order, so this is purely cosmetic). The font-size params default to this
+    function's original hardcoded sizes, so existing callers are unaffected; pass
+    larger values for a single call site without changing the shared defaults."""
     n = len(class_names)
     cm = compute_confusion_matrix(results["pred_label"].values,
                                   results["true_label"].values, n)
+    if class_order is not None:
+        perm = [class_names.index(c) for c in class_order]
+        cm = cm[np.ix_(perm, perm)]
+        class_names = class_order
     row_sums = cm.sum(axis=1, keepdims=True)
     cm_norm = np.where(row_sums > 0, cm / row_sums, 0.0)
 
     cell = max(1.2, 6.0 / n)
-    fig, ax = plt.subplots(figsize=(n * cell + 1.5, n * cell + 0.5))
+    extra_w = 2.6 if class_key else 0.0
+    fig, ax = plt.subplots(figsize=(n * cell + 1.5 + extra_w, n * cell + 0.5))
 
     im = ax.imshow(cm_norm, cmap="Blues", vmin=0, vmax=1)
 
@@ -181,17 +203,46 @@ def plot_confusion_matrix(results: pd.DataFrame, class_names: list,
         for j in range(n):
             text_color = "white" if cm_norm[i, j] > 0.6 else "black"
             ax.text(j, i, f"{cm[i, j]}\n({cm_norm[i, j]:.2f})",
-                    ha="center", va="center", fontsize=9, color=text_color)
+                    ha="center", va="center", fontsize=cell_fontsize, color=text_color)
 
     ax.set_xticks(range(n))
     ax.set_yticks(range(n))
-    ax.set_xticklabels(class_names, rotation=45, ha="right", fontsize=9)
-    ax.set_yticklabels(class_names, fontsize=9)
-    ax.set_xlabel("Predicted Class", fontsize=11)
-    ax.set_ylabel("True Class", fontsize=11)
-    ax.set_title("Confusion Matrix (count / fraction of true class)", fontsize=11)
-    fig.colorbar(im, ax=ax, shrink=0.75, label="Fraction of true class")
+    ax.set_xticklabels(class_names, rotation=45, ha="right", fontsize=tick_fontsize)
+    ax.set_yticklabels(class_names, fontsize=tick_fontsize)
+    ax.set_xlabel("Predicted Class", fontsize=label_fontsize)
+    ax.set_ylabel("True Class", fontsize=label_fontsize)
+    ax.set_title(title, fontsize=title_fontsize)
+    cbar = fig.colorbar(im, ax=ax, shrink=0.75, label="Fraction of true class")
+    cbar.ax.tick_params(labelsize=tick_fontsize)
+    cbar.ax.yaxis.label.set_size(label_fontsize)
     fig.tight_layout()
+
+    if class_key:
+        # Bold, individually-placed entries spread across the colorbar's vertical
+        # extent (rather than one centered multi-line block) use the available
+        # height instead of clustering at the middle. The horizontal offset is
+        # measured from the colorbar's own rendered label extent (not a fixed
+        # guess), so entries sit close to the colorbar without overlapping
+        # "Fraction of true class" regardless of font-size changes. bbox_inches=
+        # "tight" on savefig expands the crop to include text placed beyond the
+        # axes' right edge, so no manual figure-width math is needed here.
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        label_bbox = cbar.ax.yaxis.label.get_window_extent(renderer=renderer)
+        label_bbox_fig = label_bbox.transformed(fig.transFigure.inverted())
+        key_x = label_bbox_fig.x1 + 0.02
+
+        cbar_pos = cbar.ax.get_position()
+        items = list(class_key.items())
+        if len(items) > 1:
+            y_positions = np.linspace(cbar_pos.y1 - 0.02, cbar_pos.y0 + 0.02, len(items))
+        else:
+            y_positions = [(cbar_pos.y0 + cbar_pos.y1) / 2]
+        for (abbr, full), y in zip(items, y_positions):
+            fig.text(key_x, y, f"{abbr}:  {full}", transform=fig.transFigure,
+                      fontsize=key_fontsize, fontweight="normal", va="center", ha="left",
+                      color="#1a1a17")
+
     path = os.path.join(out_dir, "confusion_matrix.png")
     fig.savefig(path, dpi=130, bbox_inches="tight")
     plt.close(fig)
